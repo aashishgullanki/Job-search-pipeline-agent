@@ -1,0 +1,150 @@
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage[T1]{fontenc}
+\usepackage{latexsym}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\addtolength{\oddsidemargin}{-0.6in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1.2in}
+\addtolength{\topmargin}{-.85in}
+\addtolength{\textheight}{1.8in}
+
+\urlstyle{same}
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\titleformat{\section}{
+  \vspace{-8pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-5pt}]
+
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-2pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-1pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      #3 & \textit{\small #4} \\
+    \end{tabular*}\vspace{-5pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & #2 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}, itemsep=-2pt]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}[itemsep=-1pt]}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-4pt}}
+
+\begin{document}
+
+\begin{center}
+    \textbf{\Huge \scshape Aashish Gullanki} \\ \vspace{3pt}
+    \small U.S. Citizen | (571) 354-3513 $|$ 
+    \href{mailto:agullanki3@gatech.edu}{agullanki3@gatech.edu} $|$
+    \href{mailto:aashishgullanki@gmail.com}{aashishgullanki@gmail.com} $|$
+    Manassas, VA $|$
+    \href{https://linkedin.com/in/aashish-gullanki}{linkedin.com/in/aashish-gullanki}
+\end{center}
+
+\section{Education}
+\resumeSubHeadingListStart
+    \resumeSubheading
+      {Georgia Institute of Technology}{Graduation: May 2028}
+      {Master of Science in Computer Science (Artificial Intelligence Specialization)}{}
+    
+    \textit{Relevant Coursework:} Machine Learning for Trading, Computer Networks, Data Structures, Linear Algebra
+
+    \vspace{4pt}
+    \resumeSubheading
+      {Georgetown University}{Graduation: May 2024}
+      {Bachelor of Science in Biology of Global Health; Minor in Computer Science}{GPA: 3.83/4.0}
+      
+\resumeSubHeadingListEnd
+
+\section{Technical Skills}
+\begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+     \textbf{Languages:} Java, Python, C++, JavaScript, TypeScript, SQL, R \\
+     \textbf{Frameworks \& Tools:} Spring Boot, REST APIs, Kafka, Angular, PostgreSQL, Harness CI/CD, GitHub Actions, Git \\
+     \textbf{AI/ML:} LLM Integration (OpenAI, Anthropic), RAG, Prompt Engineering, Model Evaluation, scikit-learn, NumPy, pandas
+    }}
+\end{itemize}
+
+\section{Professional Experience}
+\resumeSubHeadingListStart
+
+    \resumeSubheading
+      {C. Mack Solutions}{May 2025 -- Present}
+      {Software Engineer}{}
+      \resumeItemListStart
+        \resumeItem{Enabled accurate multi-line duty calculations across 36M+ trade entries and \$225B+ in annual import duties by building a distributed Java/Spring Boot pipeline that consumed entries from Kafka queues and calculated stacked Section 232/301 tariffs using JPA across shared PostgreSQL and DB2 datastores.}
+        \resumeItem{Resolved production incidents affecting live, revenue-critical duty calculations by monitoring and troubleshooting issues during mandated 5 AM deployment windows, coordinating with DevOps under strict compliance constraints to maintain system availability.}
+        \resumeItem{Accelerated feature delivery under 2--3 day SLAs for 10+ Presidential Executive Orders imposing new trade tariffs by using Gemini CLI and Gemini Code Assist to speed up code changes, testing, and deployment via Harness CI/CD.}
+        \resumeItem{Improved performance by 50\% for the CAPE tariff refund pipeline by implementing Spring's @Cacheable with an improved cache key strategy and bulk-fetched HTS data from DB2 and Postgres, redesigning the duty recalculation algorithm around cached, batched data.}
+        \resumeItem{Delivered a zero-regression migration of CBP's importer/filer forms application from Spring Boot 3.5 to 4.0 by diagnosing REST API breaks caused by Spring Retry changes and validating the fix through automated JUnit tests and manual QA.}
+      \resumeItemListEnd
+
+    \resumeSubheading
+      {Epic Systems}{Sept 2024 -- April 2025}
+      {Technical Solutions Engineer}{}
+      \resumeItemListStart
+        \resumeItem{Streamlined care coordination across 143+ hospitals by collaborating closely with client leadership and technical partners to lead design and deployment of Epic's Emergency Department software for three enterprise healthcare clients.}
+        \resumeItem{Improved physician efficiency by 30\% and increased patient throughput by analyzing clinician performance metrics and delivering targeted software enhancements.}
+        \resumeItem{Reduced ED intake delays by 50\%+ and resolved overcrowding for thousands of emergency room users by developing a custom triage workflow through iterative, customer-centric design.}
+      \resumeItemListEnd
+
+    \resumeSubheading
+      {Centene Corporation}{May 2023 -- Aug 2023}
+      {Application Software Developer Intern}{}
+      \resumeItemListStart
+        \resumeItem{Reduced unauthorized access incidents and support tickets by over 30\% by strengthening application security through OAuth-based authentication and fine-grained authorization rules, while modernizing the internal workflow landing page using Angular, JavaScript, HTML, and CSS.}
+      \resumeItemListEnd
+
+\resumeSubHeadingListEnd
+
+\section{AI/ML Projects}
+\resumeSubHeadingListStart
+
+    \resumeProjectHeading
+      {\textbf{ML Trading Strategy Evaluation} $|$ \emph{Python, NumPy, pandas, scikit-learn}}{}
+      \resumeItemListStart
+        \resumeItem{Achieved 140\%+ cumulative return vs. a buy-and-hold benchmark by implementing a Random Forest classifier (custom RTLearner + 20-tree ensemble) to forecast 6-day forward equity returns from technical indicators, validated with a custom market simulator.}
+      \resumeItemListEnd
+
+    \resumeProjectHeading
+      {\textbf{AI Portfolio Agent} $|$ \emph{Python, LLMs (OpenAI/Anthropic), RAG, scikit-learn, GitHub Actions}}{}
+      \resumeItemListStart
+        \resumeItem{Delivered automated daily portfolio briefings forecasting next-day price direction across 12 tickers by building a scikit-learn logistic regression model and a retrieval-augmented (RAG) pipeline over multi-provider news APIs feeding LLM summarization for grounded insights.}
+        \resumeItem{Quantified forecast prediction quality with monthly Brier score tracking by implementing an SQLite-backed evaluation layer, deployed end-to-end on GitHub Actions cron with automated delivery.}
+      \resumeItemListEnd
+
+\resumeSubHeadingListEnd
+
+\end{document}
