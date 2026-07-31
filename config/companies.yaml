@@ -2,27 +2,745 @@
 #
 # track: A = direct ATS polling (greenhouse/ashby/workday public APIs)
 #        B = relies on broad NYC market scrape (LinkedIn via Apify) to surface postings
+#            (not assigned per-company here -- Track B is the blanket scrape that
+#             catches companies OUTSIDE the tier list; every tier-list company below
+#             gets A or C so it has a guaranteed, company-specific check)
 #        C = fallback hash-diff monitoring of the careers page (workday_protected/custom)
 #
 # ats_type: greenhouse | ashby | workday | workday_protected | custom
 #
-# Fill in tenant/site/slug per ats_type:
-#   greenhouse -> slug        (boards-api.greenhouse.io/v1/boards/{slug}/jobs)
-#   ashby      -> slug        (jobs.ashbyhq.com/{slug} public board api)
-#   workday    -> tenant, site (POST {tenant}.wd{N}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs)
-#   workday_protected / custom -> leave tenant/site/slug null, track must be C
+# tenant/site/slug per ats_type:
+#   greenhouse -> slug         (boards-api.greenhouse.io/v1/boards/{slug}/jobs,
+#                                a few companies are on the EU region: job-boards.eu.greenhouse.io)
+#   ashby      -> slug         (api.ashbyhq.com/posting-api/job-board/{slug})
+#   workday    -> tenant, site (POST {tenant}.wd{N}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
+#                                -- wdN varies per company, kept in careers_url)
+#   workday_protected / custom -> tenant/site/slug null, track must be C
 #
-# Every company below must end up with a non-null `track`. The coverage-matrix
-# check (build order step 1) fails loudly if any company is missing one.
+# Audited 2026-07-31 via live API verification (3 parallel batches: quant/trading,
+# AI/big tech, enterprise/finance/SaaS). Confidence varies per entry -- see `notes`.
+# Entries noting only "200 OK on career site" (not a confirmed cxs/jobs POST) should
+# be spot-checked before Track A polling code depends on them; greenhouse/ashby
+# entries were confirmed against the actual posting-api/boards-api JSON response.
+#
+# Coverage-matrix check: every company below has a non-null `track`. 89 companies
+# total (tier list had 88 unique + 1 intentional duplicate, see VS Code note).
 
-companies: []
-# Example entry once audited:
-# - name: "Example Co"
-#   tier: 1
-#   track: A
-#   ats_type: greenhouse
-#   tenant: null
-#   site: null
-#   slug: examplecowork
-#   careers_url: "https://example.com/careers"
-#   notes: ""
+companies:
+  # --- Quant / trading firms ---
+  - name: "Renaissance Technologies"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.rentec.com/Careers.action"
+    notes: "no structured board found, careers page only"
+  - name: "Radix Trading"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "radixexperienced"
+    careers_url: "https://job-boards.greenhouse.io/radixexperienced"
+    notes: "verified via boards-api, 7 jobs; also radixuniversity board exists"
+  - name: "TGS Management"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: "tgsmc"
+    careers_url: "https://jobs.lever.co/tgsmc"
+    notes: "Lever ATS confirmed via api.lever.co, currently 0 postings"
+  - name: "Arrowstreet Capital"
+    track: A
+    ats_type: workday
+    tenant: "arrowstreetcapital"
+    site: "Arrowstreet"
+    slug: null
+    careers_url: "https://arrowstreetcapital.wd5.myworkdayjobs.com/en-US/Arrowstreet"
+    notes: "wd5, confirmed via live job posting URLs"
+  - name: "PDT Partners"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "pdtpartners"
+    careers_url: "https://job-boards.greenhouse.io/pdtpartners"
+    notes: "verified via boards-api, 10 jobs"
+  - name: "Citadel Securities"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.citadelsecurities.com/careers/"
+    notes: "careers page returns 403 (bot-protected), no ATS vendor confirmed"
+  - name: "Point72"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "point72"
+    careers_url: "https://boards.greenhouse.io/point72"
+    notes: "verified via boards-api, 200 jobs"
+  - name: "Jane Street"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "janestreet"
+    careers_url: "https://boards.greenhouse.io/janestreet"
+    notes: "verified via boards-api, 100+ jobs"
+  - name: "HRT (Hudson River Trading)"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "wehrtyou"
+    careers_url: "https://job-boards.greenhouse.io/wehrtyou"
+    notes: "verified via boards-api, 73 jobs, non-obvious slug"
+  - name: "Jump Trading"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "jumptrading"
+    careers_url: "https://job-boards.greenhouse.io/jumptrading"
+    notes: "verified via boards-api, 101 jobs"
+  - name: "Bridgewater Associates"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "bridgewater89"
+    careers_url: "https://job-boards.greenhouse.io/bridgewater89"
+    notes: "verified via boards-api, 21 jobs, non-obvious slug"
+  - name: "Quadrature Capital"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "quadraturecapital"
+    careers_url: "https://job-boards.greenhouse.io/quadraturecapital"
+    notes: "verified via boards-api, 4 jobs"
+  - name: "Optiver"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.optiver.com/join-us/jobs/"
+    notes: "no recognizable ATS vendor pattern in job URLs"
+  - name: "Two Sigma"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://careers.twosigma.com/"
+    notes: "own careers portal; greenhouse/workday/ashby guesses all 404"
+  - name: "DE Shaw"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.deshaw.com/careers"
+    notes: "bespoke apply.deshaw.com portal, no vendor ATS detected"
+  - name: "Five Rings"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "fiveringsllc"
+    careers_url: "https://job-boards.greenhouse.io/fiveringsllc"
+    notes: "verified via boards-api, 18 jobs"
+  - name: "Voleon"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: "voleon"
+    careers_url: "https://jobs.lever.co/voleon"
+    notes: "Lever ATS confirmed via api.lever.co, 0 active postings currently"
+  - name: "XTX Markets"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "xtxmarketstechnologies"
+    careers_url: "https://job-boards.greenhouse.io/xtxmarketstechnologies"
+    notes: "verified via boards-api, 6 jobs"
+  - name: "Squarepoint Capital"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "squarepointcapital"
+    careers_url: "https://job-boards.greenhouse.io/squarepointcapital"
+    notes: "verified via boards-api, 88 jobs"
+  - name: "IMC Trading"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "imc"
+    careers_url: "https://job-boards.eu.greenhouse.io/imc"
+    notes: "verified via boards-api, 100 jobs, hosted on EU greenhouse region"
+  - name: "SIG (Susquehanna)"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://careers-sig.icims.com/jobs/intro"
+    notes: "iCIMS ATS confirmed via live job posting URLs"
+  - name: "DRW"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "drweng"
+    careers_url: "https://job-boards.greenhouse.io/drweng"
+    notes: "verified via boards-api, 120 jobs; also drwuniversityjobs board"
+  - name: "Virtu Financial"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "virtu"
+    careers_url: "https://job-boards.greenhouse.io/virtu"
+    notes: "verified via boards-api, 48 jobs"
+  - name: "Millennium"
+    track: A
+    ats_type: workday
+    tenant: "mlp"
+    site: "mlpcareers"
+    slug: null
+    careers_url: "https://mlp.wd5.myworkdayjobs.com/mlpcareers"
+    notes: "wd5, confirmed via live job posting URLs"
+  - name: "Tower Research Capital"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "towerresearchcapital"
+    careers_url: "https://job-boards.greenhouse.io/towerresearchcapital"
+    notes: "verified via boards-api, 74 jobs"
+  - name: "AQR Capital"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "aqr"
+    careers_url: "https://careers.aqr.com/"
+    notes: "greenhouse embedded on custom domain (gh_jid param), 48 jobs"
+  - name: "Man Group"
+    track: A
+    ats_type: workday
+    tenant: "mangroupplc"
+    site: "Man_Group_Careers"
+    slug: null
+    careers_url: "https://mangroupplc.wd3.myworkdayjobs.com/Man_Group_Careers"
+    notes: "wd3, confirmed via live job posting URLs"
+  - name: "WorldQuant"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "worldquant"
+    careers_url: "https://job-boards.greenhouse.io/worldquant"
+    notes: "verified via boards-api, 102 jobs"
+  - name: "Akuna Capital"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "akunacapital"
+    careers_url: "https://job-boards.greenhouse.io/akunacapital"
+    notes: "verified via boards-api, 34 jobs"
+
+  # --- AI / big tech ---
+  - name: "Anthropic"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "anthropic"
+    careers_url: "https://job-boards.greenhouse.io/anthropic"
+    notes: "verified via boards-api, 400 jobs returned"
+  - name: "OpenAI"
+    track: A
+    ats_type: ashby
+    tenant: null
+    site: null
+    slug: "openai"
+    careers_url: "https://jobs.ashbyhq.com/openai"
+    notes: "verified via ashby posting-api, 750 postings"
+  - name: "Nvidia"
+    track: A
+    ats_type: workday
+    tenant: "nvidia"
+    site: "NVIDIAExternalCareerSite"
+    slug: null
+    careers_url: "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"
+    notes: "wd5, verified cxs/jobs POST endpoint returns 2000 total"
+  - name: "Netflix"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://explore.jobs.netflix.net/careers"
+    notes: "powered by Eightfold AI, no public structured JSON API"
+  - name: "Roblox"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "roblox"
+    careers_url: "https://job-boards.greenhouse.io/roblox"
+    notes: "verified via boards-api, 221 jobs returned"
+  - name: "Microsoft"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://jobs.careers.microsoft.com/"
+    notes: "powered by Eightfold AI, not Workday/Greenhouse"
+  - name: "Meta"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.metacareers.com/jobs"
+    notes: "fully in-house platform, no vendor markers found"
+  - name: "Apple"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://jobs.apple.com/en-us/search"
+    notes: "fully in-house platform, no vendor markers found"
+  - name: "Google"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.google.com/about/careers/applications/jobs/results"
+    notes: "in-house careers platform, no structured public API"
+  - name: "Palantir"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://jobs.lever.co/palantir"
+    notes: "uses Lever ATS (not a supported Track A vendor yet)"
+  - name: "Airbnb"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "airbnb"
+    careers_url: "https://job-boards.greenhouse.io/airbnb"
+    notes: "verified via boards-api, 182 jobs returned"
+  - name: "Databricks"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "databricks"
+    careers_url: "https://job-boards.greenhouse.io/databricks"
+    notes: "verified via boards-api, 802 jobs returned"
+  - name: "Snowflake"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://careers.snowflake.com/us/en"
+    notes: "runs on Phenom People platform, not Workday"
+  - name: "Tesla"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.tesla.com/careers/search"
+    notes: "in-house careers site, no vendor markers found"
+  - name: "Uber"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://jobs.uber.com/"
+    notes: "in-house site, direct fetch blocked by bot detection (403)"
+  - name: "DoorDash"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "doordashusa"
+    careers_url: "https://job-boards.greenhouse.io/doordashusa"
+    notes: "verified via boards-api, 472 jobs; slug is doordashusa"
+  - name: "Robinhood"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "robinhood"
+    careers_url: "https://job-boards.greenhouse.io/robinhood"
+    notes: "verified via boards-api, 128 jobs returned"
+  - name: "Stripe"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "stripe"
+    careers_url: "https://job-boards.greenhouse.io/stripe"
+    notes: "verified via boards-api, 550 jobs returned"
+  - name: "PayPal"
+    track: A
+    ats_type: workday
+    tenant: "paypal"
+    site: "jobs"
+    slug: null
+    careers_url: "https://paypal.wd1.myworkdayjobs.com/jobs"
+    notes: "wd1, verified cxs/jobs POST endpoint returns 112 total"
+  - name: "Block (Square)"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "block"
+    careers_url: "https://job-boards.greenhouse.io/block"
+    notes: "verified via boards-api, 214 jobs returned"
+  - name: "Coinbase"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "coinbase"
+    careers_url: "https://job-boards.greenhouse.io/coinbase"
+    notes: "verified via boards-api, 162 jobs returned"
+  - name: "Bloomberg"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://bloomberg.avature.net/careers/SearchJobs"
+    notes: "uses Avature ATS (not a supported Track A vendor yet)"
+  - name: "Notion"
+    track: A
+    ats_type: ashby
+    tenant: null
+    site: null
+    slug: "notion"
+    careers_url: "https://jobs.ashbyhq.com/notion"
+    notes: "verified via ashby posting-api, 109 postings"
+  - name: "Asana"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "asana"
+    careers_url: "https://job-boards.greenhouse.io/asana"
+    notes: "verified via boards-api, 143 jobs returned"
+  - name: "Coupang"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.coupang.jobs/en/jobs/"
+    notes: "Cloudflare-blocked (403), vendor undetermined"
+  - name: "Duolingo"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "duolingo"
+    careers_url: "https://job-boards.greenhouse.io/duolingo"
+    notes: "verified via boards-api, 67 jobs returned"
+  - name: "Snap Inc."
+    track: A
+    ats_type: workday
+    tenant: "snapchat"
+    site: "snap"
+    slug: null
+    careers_url: "https://snapchat.wd1.myworkdayjobs.com/snap"
+    notes: "wd1, verified cxs/jobs POST endpoint returns 171 total"
+  - name: "Cloudflare"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "cloudflare"
+    careers_url: "https://job-boards.greenhouse.io/cloudflare"
+    notes: "verified via boards-api, 284 jobs returned"
+  - name: "LinkedIn"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://careers.linkedin.com/"
+    notes: "in-house platform, no vendor markers found"
+  - name: "Spotify"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.lifeatspotify.com/jobs"
+    notes: "in-house site, no vendor markers found in source"
+
+  # --- Enterprise / finance / SaaS ---
+  - name: "Dropbox"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "dropbox"
+    careers_url: "https://boards.greenhouse.io/dropbox"
+    notes: "verified via boards-api, 31 jobs returned"
+  - name: "Pinterest"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "pinterest"
+    careers_url: "https://boards.greenhouse.io/pinterest"
+    notes: "verified via boards-api, 100+ jobs returned"
+  - name: "Plaid"
+    track: A
+    ats_type: ashby
+    tenant: null
+    site: null
+    slug: "plaid"
+    careers_url: "https://jobs.ashbyhq.com/plaid"
+    notes: "verified via posting-api, 8 postings returned"
+  - name: "Figma"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "figma"
+    careers_url: "https://boards.greenhouse.io/figma"
+    notes: "verified via boards-api"
+  - name: "Discord"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "discord"
+    careers_url: "https://boards.greenhouse.io/discord"
+    notes: "verified via boards-api, 44 jobs returned"
+  - name: "VS Code (Microsoft)"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://careers.microsoft.com"
+    notes: "duplicate of Microsoft entry, same in-house careers system -- consider deduping, kept separate since it was listed separately"
+  - name: "Amazon"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.amazon.jobs"
+    notes: "proprietary site (amazon.jobs); some regions use iCIMS backend"
+  - name: "Adobe"
+    track: A
+    ats_type: workday
+    tenant: "adobe"
+    site: "external_experienced"
+    slug: null
+    careers_url: "https://adobe.wd5.myworkdayjobs.com/external_experienced"
+    notes: "wd5; only 200-OK confirmed on career site, cxs endpoint not spot-checked -- verify before relying on it"
+  - name: "Blackstone"
+    track: A
+    ats_type: workday
+    tenant: "blackstone"
+    site: "BX_External_Site"
+    slug: null
+    careers_url: "https://blackstone.wd1.myworkdayjobs.com/BX_External_Site"
+    notes: "wd1; only 200-OK confirmed on career site -- verify cxs endpoint before relying on it"
+  - name: "Salesforce"
+    track: A
+    ats_type: workday
+    tenant: "salesforce"
+    site: "External_Career_Site"
+    slug: null
+    careers_url: "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site"
+    notes: "wd12 (wd1 variant 500s); only 200-OK confirmed -- verify cxs endpoint before relying on it"
+  - name: "eBay"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://jobs.ebayinc.com/us/en"
+    notes: "Phenom People platform, confirmed via asset URLs"
+  - name: "X (Twitter)"
+    track: C
+    ats_type: workday_protected
+    tenant: "twitter"
+    site: "X"
+    slug: null
+    careers_url: "https://careers.x.com/en"
+    notes: "tenant found via search; cxs POST returns HTTP 422, Cloudflare-fronted -- treat as protected"
+  - name: "GitHub"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://github.careers"
+    notes: "iCIMS (careers-githubinc.icims.com), still separate from Microsoft's system"
+  - name: "HashiCorp"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.ibm.com/careers/search?q=hashicorp"
+    notes: "acquired by IBM, hiring folded into IBM careers site, ATS backend unclear"
+  - name: "Oracle"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://careers.oracle.com"
+    notes: "Oracle Recruiting Cloud/Fusion (OCI-backed), confirmed via response headers"
+  - name: "Lyft"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "lyft"
+    careers_url: "https://boards.greenhouse.io/lyft"
+    notes: "verified via boards-api, 200+ jobs returned"
+  - name: "Twitch"
+    track: A
+    ats_type: greenhouse
+    tenant: null
+    site: null
+    slug: "twitch"
+    careers_url: "https://job-boards.greenhouse.io/twitch"
+    notes: "verified via boards-api, 62 jobs returned"
+  - name: "Atlassian"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.atlassian.com/company/careers/all-jobs"
+    notes: "Magnolia CMS front-end; backend ATS unconfirmed"
+  - name: "Capital One"
+    track: A
+    ats_type: workday
+    tenant: "capitalone"
+    site: "Capital_One"
+    slug: null
+    careers_url: "https://capitalone.wd12.myworkdayjobs.com/Capital_One"
+    notes: "wd12 (wd1 variant 500s); only 200-OK confirmed -- verify cxs endpoint before relying on it"
+  - name: "JPMorgan Chase"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001"
+    notes: "Oracle Fusion Cloud Recruiting, not Workday"
+  - name: "Morgan Stanley"
+    track: A
+    ats_type: workday
+    tenant: "ms"
+    site: "External"
+    slug: null
+    careers_url: "https://ms.wd5.myworkdayjobs.com/External"
+    notes: "wd5; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+  - name: "Intel"
+    track: A
+    ats_type: workday
+    tenant: "intel"
+    site: "External"
+    slug: null
+    careers_url: "https://intel.wd1.myworkdayjobs.com/External"
+    notes: "wd1; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+  - name: "Booking.com"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://careers.booking.com"
+    notes: "iCIMS-linked custom portal; parent BKNG uses a separate Workday tenant"
+  - name: "BlackRock"
+    track: A
+    ats_type: workday
+    tenant: "blackrock"
+    site: "BlackRock_Professional"
+    slug: null
+    careers_url: "https://blackrock.wd1.myworkdayjobs.com/BlackRock_Professional"
+    notes: "wd1; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+  - name: "IBM"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://www.ibm.com/careers"
+    notes: "proprietary, Akamai bot-protected, no clear ATS vendor signature"
+  - name: "Citi"
+    track: A
+    ats_type: workday
+    tenant: "citi"
+    site: "2"
+    slug: null
+    careers_url: "https://citi.wd5.myworkdayjobs.com/2"
+    notes: "wd5, numeric site name '2' inferred from page refs -- verify before relying on it"
+  - name: "Wells Fargo"
+    track: A
+    ats_type: workday
+    tenant: "wf"
+    site: "WellsFargoJobs"
+    slug: null
+    careers_url: "https://wf.wd1.myworkdayjobs.com/WellsFargoJobs"
+    notes: "wd1; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+  - name: "Goldman Sachs"
+    track: C
+    ats_type: custom
+    tenant: null
+    site: null
+    slug: null
+    careers_url: "https://higher.gs.com"
+    notes: "own Next.js app 'Higher' + Contentful CMS, confirmed via raw HTML; not Workday despite common assumption"
+  - name: "Barclays"
+    track: A
+    ats_type: workday
+    tenant: "barclays"
+    site: "External_Career_Site_Barclays"
+    slug: null
+    careers_url: "https://barclays.wd3.myworkdayjobs.com/External_Career_Site_Barclays"
+    notes: "wd3; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+  - name: "Boeing"
+    track: A
+    ats_type: workday
+    tenant: "boeing"
+    site: "EXTERNAL_CAREERS"
+    slug: null
+    careers_url: "https://boeing.wd1.myworkdayjobs.com/EXTERNAL_CAREERS"
+    notes: "wd1; only 200-OK confirmed -- verify cxs endpoint before relying on it"
