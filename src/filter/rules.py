@@ -120,10 +120,13 @@ TITLE_KEYWORDS = [
     "ml engineer",
 ]
 
-# Exactly the four levels the user named -- not padded out with unrequested
-# synonyms (Lead/Director/VP/Head of) so the exclusion set stays precise and
-# auditable; easy to extend if those should be added too.
-SENIORITY_EXCLUDE_KEYWORDS = ["senior", "sr", "staff", "principal", "manager"]
+# Senior/Sr./Staff/Principal/Manager were the four levels originally named;
+# Lead was added after reviewing real results -- ~18% of what passed the
+# filter was "Lead Software Engineer"-type titles (mostly Capital One),
+# which reads as senior-tier in practice and is out of scope at ~22 months
+# of experience. Director/VP/Head of remain unrequested -- add them here
+# too if they should also be excluded.
+SENIORITY_EXCLUDE_KEYWORDS = ["senior", "sr", "staff", "principal", "manager", "lead"]
 
 
 def _normalize_title(title: str) -> str:

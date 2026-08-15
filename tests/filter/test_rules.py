@@ -169,6 +169,14 @@ def test_seniority_exclusion_matches_manager():
     assert matches_seniority_exclusion("Engineering Manager") is True
 
 
+def test_seniority_exclusion_matches_lead():
+    # Added after reviewing real results: "Lead Software Engineer" reads as
+    # senior-tier in practice (mostly seen at Capital One), added to the
+    # exclusion list alongside Senior/Staff/Principal/Manager.
+    assert matches_seniority_exclusion("Lead Software Engineer") is True
+    assert matches_seniority_exclusion("Lead Machine Learning Engineer") is True
+
+
 def test_seniority_exclusion_does_not_match_entry_level_title():
     assert matches_seniority_exclusion("Software Engineer") is False
     assert matches_seniority_exclusion("Software Engineer II") is False
@@ -207,6 +215,12 @@ def test_evaluate_posting_excludes_by_title_keyword():
 
 def test_evaluate_posting_excludes_by_title_seniority():
     j = _job(title="Senior Software Engineer")
+    result = evaluate_posting(j["title"], j["location"], j["raw_json"])
+    assert result["excluded_by"] == "title_seniority"
+
+
+def test_evaluate_posting_excludes_lead_titles():
+    j = _job(title="Lead Software Engineer, Full Stack")
     result = evaluate_posting(j["title"], j["location"], j["raw_json"])
     assert result["excluded_by"] == "title_seniority"
 
