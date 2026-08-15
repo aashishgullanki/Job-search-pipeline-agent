@@ -33,3 +33,10 @@ def track_a_workday_companies(companies: list[dict] | None = None) -> list[dict]
     if companies is None:
         companies = load_companies()
     return [c for c in companies if c.get("track") == "A" and c.get("ats_type") == "workday"]
+
+
+def track_c_companies(companies: list[dict] | None = None) -> list[dict]:
+    """Track C companies monitored via careers-page hash-diffing (no clean ATS API)."""
+    if companies is None:
+        companies = load_companies()
+    return [c for c in companies if c.get("track") == "C"]
