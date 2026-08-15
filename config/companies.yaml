@@ -18,13 +18,13 @@
 #   workday_protected / custom -> tenant/site/slug null, track must be C
 #
 # Audited 2026-07-31 via live API verification (3 parallel batches: quant/trading,
-# AI/big tech, enterprise/finance/SaaS). Confidence varies per entry -- see `notes`.
-# Entries noting only "200 OK on career site" (not a confirmed cxs/jobs POST) should
-# be spot-checked before Track A polling code depends on them; greenhouse/ashby
-# entries were confirmed against the actual posting-api/boards-api JSON response.
+# AI/big tech, enterprise/finance/SaaS). All greenhouse/ashby entries confirmed
+# against the actual posting-api/boards-api JSON response; all workday entries
+# confirmed against the actual cxs/jobs POST response (last spot-check 2026-08-15).
 #
-# Coverage-matrix check: every company below has a non-null `track`. 89 companies
-# total (tier list had 88 unique + 1 intentional duplicate, see VS Code note).
+# Coverage-matrix check: every company below has a non-null `track`. 88 companies
+# total -- "VS Code (Microsoft)" was deduped into the "Microsoft" entry since both
+# resolve to the same in-house careers system.
 
 companies:
   # --- Quant / trading firms ---
@@ -309,7 +309,7 @@ companies:
     site: null
     slug: null
     careers_url: "https://jobs.careers.microsoft.com/"
-    notes: "powered by Eightfold AI, not Workday/Greenhouse"
+    notes: "powered by Eightfold AI, not Workday/Greenhouse; covers VS Code team postings too (dedup'd from a separate 'VS Code (Microsoft)' tier-list entry, filter by 'Visual Studio Code' in title downstream if needed)"
   - name: "Meta"
     track: C
     ats_type: custom
@@ -544,14 +544,6 @@ companies:
     slug: "discord"
     careers_url: "https://boards.greenhouse.io/discord"
     notes: "verified via boards-api, 44 jobs returned"
-  - name: "VS Code (Microsoft)"
-    track: C
-    ats_type: custom
-    tenant: null
-    site: null
-    slug: null
-    careers_url: "https://careers.microsoft.com"
-    notes: "duplicate of Microsoft entry, same in-house careers system -- consider deduping, kept separate since it was listed separately"
   - name: "Amazon"
     track: C
     ats_type: custom
@@ -567,7 +559,7 @@ companies:
     site: "external_experienced"
     slug: null
     careers_url: "https://adobe.wd5.myworkdayjobs.com/external_experienced"
-    notes: "wd5; only 200-OK confirmed on career site, cxs endpoint not spot-checked -- verify before relying on it"
+    notes: "wd5; confirmed via cxs/jobs POST, 781 jobs returned (2026-08-15)"
   - name: "Blackstone"
     track: A
     ats_type: workday
@@ -575,7 +567,7 @@ companies:
     site: "BX_External_Site"
     slug: null
     careers_url: "https://blackstone.wd1.myworkdayjobs.com/BX_External_Site"
-    notes: "wd1; only 200-OK confirmed on career site -- verify cxs endpoint before relying on it"
+    notes: "wd1; confirmed via cxs/jobs POST, 120 jobs returned (2026-08-15)"
   - name: "Salesforce"
     track: A
     ats_type: workday
@@ -583,7 +575,7 @@ companies:
     site: "External_Career_Site"
     slug: null
     careers_url: "https://salesforce.wd12.myworkdayjobs.com/External_Career_Site"
-    notes: "wd12 (wd1 variant 500s); only 200-OK confirmed -- verify cxs endpoint before relying on it"
+    notes: "wd12 (wd1 variant 500s); confirmed via cxs/jobs POST, 1514 jobs returned (2026-08-15)"
   - name: "eBay"
     track: C
     ats_type: custom
@@ -655,7 +647,7 @@ companies:
     site: "Capital_One"
     slug: null
     careers_url: "https://capitalone.wd12.myworkdayjobs.com/Capital_One"
-    notes: "wd12 (wd1 variant 500s); only 200-OK confirmed -- verify cxs endpoint before relying on it"
+    notes: "wd12 (wd1 variant 500s); confirmed via cxs/jobs POST, 1841 jobs returned (2026-08-15)"
   - name: "JPMorgan Chase"
     track: C
     ats_type: custom
@@ -671,7 +663,7 @@ companies:
     site: "External"
     slug: null
     careers_url: "https://ms.wd5.myworkdayjobs.com/External"
-    notes: "wd5; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+    notes: "wd5; confirmed via cxs/jobs POST, 1385 jobs returned (2026-08-15)"
   - name: "Intel"
     track: A
     ats_type: workday
@@ -679,7 +671,7 @@ companies:
     site: "External"
     slug: null
     careers_url: "https://intel.wd1.myworkdayjobs.com/External"
-    notes: "wd1; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+    notes: "wd1; confirmed via cxs/jobs POST, 667 jobs returned (2026-08-15)"
   - name: "Booking.com"
     track: C
     ats_type: custom
@@ -695,7 +687,7 @@ companies:
     site: "BlackRock_Professional"
     slug: null
     careers_url: "https://blackrock.wd1.myworkdayjobs.com/BlackRock_Professional"
-    notes: "wd1; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+    notes: "wd1; confirmed via cxs/jobs POST, 280 jobs returned (2026-08-15)"
   - name: "IBM"
     track: C
     ats_type: custom
@@ -711,7 +703,7 @@ companies:
     site: "2"
     slug: null
     careers_url: "https://citi.wd5.myworkdayjobs.com/2"
-    notes: "wd5, numeric site name '2' inferred from page refs -- verify before relying on it"
+    notes: "wd5, numeric site name (2); confirmed via cxs/jobs POST, 2000 jobs returned (2026-08-15, likely capped)"
   - name: "Wells Fargo"
     track: A
     ats_type: workday
@@ -719,7 +711,7 @@ companies:
     site: "WellsFargoJobs"
     slug: null
     careers_url: "https://wf.wd1.myworkdayjobs.com/WellsFargoJobs"
-    notes: "wd1; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+    notes: "wd1; confirmed via cxs/jobs POST, 1800 jobs returned (2026-08-15)"
   - name: "Goldman Sachs"
     track: C
     ats_type: custom
@@ -735,7 +727,7 @@ companies:
     site: "External_Career_Site_Barclays"
     slug: null
     careers_url: "https://barclays.wd3.myworkdayjobs.com/External_Career_Site_Barclays"
-    notes: "wd3; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+    notes: "wd3; confirmed via cxs/jobs POST, 1071 jobs returned (2026-08-15)"
   - name: "Boeing"
     track: A
     ats_type: workday
@@ -743,4 +735,4 @@ companies:
     site: "EXTERNAL_CAREERS"
     slug: null
     careers_url: "https://boeing.wd1.myworkdayjobs.com/EXTERNAL_CAREERS"
-    notes: "wd1; only 200-OK confirmed -- verify cxs endpoint before relying on it"
+    notes: "wd1; confirmed via cxs/jobs POST, 741 jobs returned (2026-08-15)"
