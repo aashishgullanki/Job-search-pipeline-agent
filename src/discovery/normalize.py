@@ -40,3 +40,21 @@ def normalize_ashby_job(company: str, job: dict) -> dict:
         "posted_at": job.get("publishedAt"),
         "raw_json": json.dumps(job),
     }
+
+
+def normalize_workday_job(company: str, job: dict, base_url: str) -> dict:
+    """`base_url` is the job board root, e.g. https://adobe.wd5.myworkdayjobs.com/external_experienced --
+    Workday's cxs/jobs response only gives a relative `externalPath` per posting, not an absolute URL.
+    """
+    external_path = job.get("externalPath", "")
+    url = f"{base_url}{external_path}" if external_path else base_url
+    return {
+        "source": f"ats:{company}",
+        "company": company,
+        "title": job.get("title", ""),
+        "url": url,
+        "url_hash": _url_hash(url),
+        "location": job.get("locationsText"),
+        "posted_at": job.get("postedOn"),
+        "raw_json": json.dumps(job),
+    }

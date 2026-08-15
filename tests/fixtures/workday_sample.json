@@ -1,0 +1,21 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Software Engineer, Backend",
+      "externalPath": "/job/New-York/Software-Engineer--Backend_R100001",
+      "locationsText": "New York",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": ["R100001"]
+    },
+    {
+      "title": "AI Engineer",
+      "externalPath": "/job/New-York/AI-Engineer_R100002",
+      "locationsText": "New York",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": ["R100002"]
+    }
+  ],
+  "facets": [],
+  "userAuthenticated": false
+}

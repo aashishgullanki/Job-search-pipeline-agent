@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 
-from src.discovery.normalize import normalize_ashby_job, normalize_greenhouse_job
+from src.discovery.normalize import (
+    normalize_ashby_job,
+    normalize_greenhouse_job,
+    normalize_workday_job,
+)
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -53,3 +57,27 @@ def test_same_url_produces_same_hash():
     a = normalize_greenhouse_job("X", job)
     b = normalize_greenhouse_job("X", job)
     assert a["url_hash"] == b["url_hash"]
+
+
+def test_normalize_workday_job():
+    data = json.loads((FIXTURES / "workday_sample.json").read_text())
+    job = data["jobPostings"][0]
+    base_url = "https://example.wd5.myworkdayjobs.com/External"
+
+    result = normalize_workday_job("ExampleCo", job, base_url)
+
+    assert result["source"] == "ats:ExampleCo"
+    assert result["title"] == "Software Engineer, Backend"
+    assert (
+        result["url"]
+        == "https://example.wd5.myworkdayjobs.com/External/job/New-York/Software-Engineer--Backend_R100001"
+    )
+    assert result["location"] == "New York"
+    assert result["posted_at"] == "Posted Yesterday"
+    assert len(result["url_hash"]) == 64
+
+
+def test_normalize_workday_job_missing_external_path_falls_back_to_base_url():
+    job = {"title": "Foo"}
+    result = normalize_workday_job("X", job, "https://x.wd1.myworkdayjobs.com/External")
+    assert result["url"] == "https://x.wd1.myworkdayjobs.com/External"
