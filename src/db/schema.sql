@@ -56,3 +56,12 @@ CREATE TABLE IF NOT EXISTS company_monitor_alerts (
     detected_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (company, snippet_hash)
 );
+
+CREATE TABLE IF NOT EXISTS filter_results (
+    posting_id INTEGER NOT NULL REFERENCES postings(id),
+    passed INTEGER NOT NULL,           -- 1 = passed every rule, 0 = excluded
+    excluded_by TEXT,                  -- rule that excluded it (location | employment_type |
+                                        -- title_keyword | title_seniority), NULL if passed
+    filtered_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (posting_id)
+);
