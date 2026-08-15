@@ -4,6 +4,7 @@ from pathlib import Path
 from src.discovery.normalize import (
     normalize_ashby_job,
     normalize_greenhouse_job,
+    normalize_linkedin_job,
     normalize_workday_job,
 )
 
@@ -81,3 +82,28 @@ def test_normalize_workday_job_missing_external_path_falls_back_to_base_url():
     job = {"title": "Foo"}
     result = normalize_workday_job("X", job, "https://x.wd1.myworkdayjobs.com/External")
     assert result["url"] == "https://x.wd1.myworkdayjobs.com/External"
+
+
+def test_normalize_linkedin_job():
+    data = json.loads((FIXTURES / "linkedin_sample.json").read_text())
+    job = data[0]
+
+    result = normalize_linkedin_job(job)
+
+    assert result["source"] == "linkedin"
+    assert result["company"] == "Example Startup Inc"
+    assert result["title"] == "Software Engineer, Backend"
+    assert result["url"] == "https://www.linkedin.com/jobs/view/4012345678"
+    assert result["location"] == "New York, NY"
+    assert result["posted_at"] == "2026-08-10"
+    assert len(result["url_hash"]) == 64
+    assert json.loads(result["raw_json"]) == job
+
+
+def test_normalize_linkedin_job_missing_fields_defaults_gracefully():
+    result = normalize_linkedin_job({})
+    assert result["source"] == "linkedin"
+    assert result["company"] == ""
+    assert result["title"] == ""
+    assert result["url"] == ""
+    assert result["location"] is None

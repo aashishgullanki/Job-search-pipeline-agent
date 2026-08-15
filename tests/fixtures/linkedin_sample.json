@@ -1,0 +1,26 @@
+[
+  {
+    "id": "4012345678",
+    "title": "Software Engineer, Backend",
+    "companyName": "Example Startup Inc",
+    "location": "New York, NY",
+    "link": "https://www.linkedin.com/jobs/view/4012345678",
+    "postedAt": "2026-08-10",
+    "employmentType": "Full-time",
+    "seniorityLevel": "Mid-Senior level",
+    "workRemoteAllowed": false,
+    "descriptionText": "We are looking for a backend software engineer..."
+  },
+  {
+    "id": "4012345679",
+    "title": "AI Engineer",
+    "companyName": "Another NYC Co",
+    "location": "New York, NY",
+    "link": "https://www.linkedin.com/jobs/view/4012345679",
+    "postedAt": "2026-08-11",
+    "employmentType": "Full-time",
+    "seniorityLevel": "Entry level",
+    "workRemoteAllowed": true,
+    "descriptionText": "Join our applied AI team..."
+  }
+]

@@ -58,3 +58,25 @@ def normalize_workday_job(company: str, job: dict, base_url: str) -> dict:
         "posted_at": job.get("postedOn"),
         "raw_json": json.dumps(job),
     }
+
+
+def normalize_linkedin_job(job: dict) -> dict:
+    """Field names match the curious_coder/linkedin-jobs-scraper Apify actor's
+    documented output schema: title, companyName, location, link, postedAt.
+
+    Unlike the ATS normalizers, `source` is the fixed string "linkedin" (not
+    "ats:{company}") -- Track B isn't tied to one company's board, it's a
+    blanket market scrape, so `company` (from the job payload) is where the
+    per-posting company lives instead.
+    """
+    url = job.get("link") or job.get("url") or ""
+    return {
+        "source": "linkedin",
+        "company": job.get("companyName", ""),
+        "title": job.get("title", ""),
+        "url": url,
+        "url_hash": _url_hash(url),
+        "location": job.get("location"),
+        "posted_at": job.get("postedAt"),
+        "raw_json": json.dumps(job),
+    }
