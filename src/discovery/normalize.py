@@ -60,16 +60,33 @@ def normalize_workday_job(company: str, job: dict, base_url: str) -> dict:
     }
 
 
+def _canonical_linkedin_url(job: dict) -> str:
+    """LinkedIn job `link` URLs carry per-search tracking params (refId,
+    trackingId, position, pageNum) that regenerate on every single search --
+    found live, running the same search twice: the same job id came back
+    with two completely different `link` values. Hashing the raw link would
+    treat every re-fetch of the same posting as "new" and defeat dedup
+    entirely, so the canonical URL is built from the stable `id` field
+    instead. Falls back to stripping the query string off `link` if `id`
+    is ever missing (LinkedIn job URLs are stable up to the query string).
+    """
+    job_id = job.get("id")
+    if job_id:
+        return f"https://www.linkedin.com/jobs/view/{job_id}"
+    link = job.get("link") or job.get("url") or ""
+    return link.split("?", 1)[0]
+
+
 def normalize_linkedin_job(job: dict) -> dict:
     """Field names match the curious_coder/linkedin-jobs-scraper Apify actor's
-    documented output schema: title, companyName, location, link, postedAt.
+    documented output schema: id, title, companyName, location, link, postedAt.
 
     Unlike the ATS normalizers, `source` is the fixed string "linkedin" (not
     "ats:{company}") -- Track B isn't tied to one company's board, it's a
     blanket market scrape, so `company` (from the job payload) is where the
     per-posting company lives instead.
     """
-    url = job.get("link") or job.get("url") or ""
+    url = _canonical_linkedin_url(job)
     return {
         "source": "linkedin",
         "company": job.get("companyName", ""),

@@ -100,6 +100,40 @@ def test_normalize_linkedin_job():
     assert json.loads(result["raw_json"]) == job
 
 
+def test_normalize_linkedin_job_ignores_per_search_tracking_params_in_link():
+    # Live-observed: the same job id comes back with a completely different
+    # `link` (different refId/trackingId/position) on every fresh search of
+    # the same query. Dedup must key off the stable id, not the raw link,
+    # or every re-fetch of an already-seen posting looks "new".
+    job_run_1 = {
+        "id": "4449057383",
+        "title": "Software Developer",
+        "link": "https://www.linkedin.com/jobs/view/software-developer-at-x-4449057383"
+        "?position=10&pageNum=0&refId=AAA&trackingId=BBB",
+    }
+    job_run_2 = {
+        "id": "4449057383",
+        "title": "Software Developer",
+        "link": "https://www.linkedin.com/jobs/view/software-developer-at-x-4449057383"
+        "?position=3&pageNum=0&refId=ZZZ&trackingId=YYY",
+    }
+
+    result_1 = normalize_linkedin_job(job_run_1)
+    result_2 = normalize_linkedin_job(job_run_2)
+
+    assert result_1["url_hash"] == result_2["url_hash"]
+    assert result_1["url"] == "https://www.linkedin.com/jobs/view/4449057383"
+
+
+def test_normalize_linkedin_job_falls_back_to_stripped_link_when_id_missing():
+    job = {
+        "title": "Foo",
+        "link": "https://www.linkedin.com/jobs/view/foo-at-x-123?position=1&refId=AAA",
+    }
+    result = normalize_linkedin_job(job)
+    assert result["url"] == "https://www.linkedin.com/jobs/view/foo-at-x-123"
+
+
 def test_normalize_linkedin_job_missing_fields_defaults_gracefully():
     result = normalize_linkedin_job({})
     assert result["source"] == "linkedin"

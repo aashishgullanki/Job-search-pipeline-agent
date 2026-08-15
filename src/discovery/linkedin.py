@@ -51,7 +51,10 @@ def run_apify_actor(actor_id: str, token: str, run_input: dict, timeout: int = 1
     except requests.RequestException as e:
         raise RuntimeError(f"apify actor run failed: {e}") from e
 
-    if resp.status_code != 200:
+    # Found live: this endpoint doesn't always return 200 on success -- a run
+    # that actually executes (rather than reusing a cached/build result) came
+    # back 201, with a perfectly valid dataset-items body. Any 2xx is success.
+    if not (200 <= resp.status_code < 300):
         raise RuntimeError(
             f"apify actor run failed: HTTP {resp.status_code} - {resp.text[:300]}"
         )

@@ -53,6 +53,18 @@ def test_run_apify_actor_posts_token_as_query_param_and_input_as_body(monkeypatc
     assert "some~actor" in captured["url"]
 
 
+def test_run_apify_actor_accepts_201_as_success(monkeypatch):
+    # Live-observed: a run that actually executes (rather than reusing a
+    # cached/build result) can come back 201 with a perfectly valid body.
+    monkeypatch.setattr(
+        linkedin_mod.requests, "post", lambda *a, **kw: FakeResponse([_job(1)], status_code=201)
+    )
+
+    result = linkedin_mod.run_apify_actor("some~actor", "tok", {})
+
+    assert result == [_job(1)]
+
+
 def test_run_apify_actor_raises_on_non_200(monkeypatch):
     monkeypatch.setattr(
         linkedin_mod.requests,
