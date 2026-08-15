@@ -11,6 +11,18 @@ See [job_search_agent_architecture.md](job_search_agent_architecture.md) for the
 - `resumes/` — existing per-company LaTeX resume bases (baseline tailoring inputs).
 - `data/` — local SQLite DB and generated artifacts (gitignored).
 
+## Running discovery
+
+```
+pip install -r requirements-dev.txt   # includes pytest
+python3 -m pytest tests/              # unit tests (no network)
+python3 -m src.discovery.run_track_a_simple   # live poll: Greenhouse + Ashby companies (39)
+```
+
+The runner is idempotent — re-running it against the same DB only inserts postings not already seen (deduped by URL hash).
+
 ## Status
 
-Build order step 1 (company ATS audit) in progress — see `config/companies.yaml`.
+- Step 1 (company ATS audit) — done, see `config/companies.yaml` (88 companies, 56 Track A / 32 Track C).
+- Step 2 (Track A discovery), Greenhouse + Ashby half — done: `src/discovery/{greenhouse,ashby,normalize,store,config}.py` + `run_track_a_simple.py`, covers 39 companies, tested live end-to-end including dedup idempotency.
+- Workday polling (pagination/retry) — not started yet.
