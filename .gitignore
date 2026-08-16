@@ -12,3 +12,9 @@ data/tailored/*.tex
 data/tailored/*.aux
 data/tailored/*.log
 data/tailored/*.out
+
+# Permanent local copies of tailored resume output for manual review.
+# Deliberately OUTSIDE data/ and never touched by any cleanup command --
+# data/tailored/* gets swept after each live verification run, this doesn't.
+# Contains personal info (name/phone/email), so gitignored, not committed.
+reviewed_output/
