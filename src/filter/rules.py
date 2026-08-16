@@ -118,6 +118,18 @@ TITLE_KEYWORDS = [
     "artificial intelligence engineer",
     "machine learning engineer",
     "ml engineer",
+    "deep learning engineer",
+    "deep learning research engineer",
+    # Bare "research engineer" was added after reviewing 25 excluded Data/
+    # Research Engineer postings: HRT- and Jump Trading-style "Research
+    # Engineer" / "AI Research Engineer" roles skew quant/ML even without
+    # the literal word "AI", and this phrase already covers "AI Research
+    # Engineer" and "Machine Learning Research Engineer" too (both contain
+    # "research engineer" as a substring). Deliberately NOT adding bare
+    # "data engineer" -- that pulled in more data-infra/pipeline noise
+    # (Point72's Data Engineer cluster, Stripe's "Data Analyst") than real
+    # matches when the samples were reviewed.
+    "research engineer",
 ]
 
 # Senior/Sr./Staff/Principal/Manager were the four levels originally named;

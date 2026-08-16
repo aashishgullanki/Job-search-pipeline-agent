@@ -149,6 +149,37 @@ def test_swe_keyword_does_not_false_positive_inside_other_words():
     assert matches_title_keywords("Answered support tickets") is False
 
 
+def test_title_matches_bare_research_engineer():
+    # Added after reviewing real excluded postings: HRT/Jump Trading-style
+    # "Research Engineer" roles skew quant/ML even without "AI" literally
+    # in the title.
+    assert matches_title_keywords("Research Engineer") is True
+
+
+def test_title_matches_ai_research_engineer_via_bare_research_engineer():
+    # No separate "ai research engineer" keyword needed -- "research
+    # engineer" alone matches as a substring of this title too.
+    assert matches_title_keywords("AI Research Engineer, Pre-Training") is True
+
+
+def test_title_matches_deep_learning_engineer():
+    assert matches_title_keywords("Deep Learning Engineer") is True
+    assert matches_title_keywords("Campus AI Research Engineer – Deep Learning (Full-Time)") is True
+
+
+def test_title_still_rejects_bare_data_engineer():
+    # Explicitly not added -- reviewed samples showed this pulls in more
+    # data-infra/pipeline noise (Point72's Data Engineer cluster, Stripe's
+    # "Data Analyst") than real ML/AI matches.
+    assert matches_title_keywords("Data Engineer") is False
+    assert matches_title_keywords("Data Engineer, Knowledge Graph") is False
+    assert matches_title_keywords("Low-Latency Market Data Engineer") is False
+
+
+def test_title_still_rejects_data_analyst():
+    assert matches_title_keywords("Data Analyst, Financial Data Engineering") is False
+
+
 def test_seniority_exclusion_matches_senior():
     assert matches_seniority_exclusion("Senior Software Engineer") is True
 
