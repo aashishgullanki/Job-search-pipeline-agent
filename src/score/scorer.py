@@ -15,12 +15,9 @@ keyword rules trying to double-check the LLM's judgment -- that would just
 reintroduce the brittleness this stage exists to avoid.
 """
 
-import html
-import json
-import re
-
 import anthropic
 
+from src.common.text import extract_description
 from src.score.profile import build_profile_summary
 
 MODEL = "claude-haiku-4-5-20251001"
@@ -58,20 +55,8 @@ candidate's actual years of experience. Call the submit_fit_score tool with your
 (1-10) and a 2-3 sentence reasoning."""
 
 
-def _extract_description(raw_json: dict) -> str | None:
-    """Descriptions aren't uniformly available: Greenhouse/Ashby/LinkedIn
-    carry one, Workday's cxs/jobs list endpoint doesn't expose one at all.
-    Returns plain text, or None if nothing usable was found.
-    """
-    desc = raw_json.get("content") or raw_json.get("descriptionText") or raw_json.get("descriptionHtml")
-    if not desc:
-        return None
-    plain = html.unescape(re.sub(r"<[^<]+?>", " ", desc))
-    return re.sub(r"\s+", " ", plain).strip()
-
-
 def build_scoring_prompt(profile: str, title: str, company: str, location: str, raw_json: dict) -> str:
-    description = _extract_description(raw_json)
+    description = extract_description(raw_json)
     description_block = description[:3000] if description else "(no description available for this posting)"
     return f"""## Candidate profile
 

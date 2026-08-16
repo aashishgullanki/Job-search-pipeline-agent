@@ -4,3 +4,4 @@ python-dotenv
 anthropic
 playwright
 beautifulsoup4
+pypdf

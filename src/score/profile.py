@@ -17,6 +17,8 @@ generic solution this task doesn't need.
 import re
 from pathlib import Path
 
+from src.common.latex import extract_command_args, strip_comments
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESUMES_DIR = REPO_ROOT / "resumes"
 BASELINE_RESUME = RESUMES_DIR / "Baseline Resume.tex"
@@ -24,10 +26,6 @@ BASELINE_RESUME = RESUMES_DIR / "Baseline Resume.tex"
 # Sections relevant to a fit judgment. Contact info / header intentionally
 # excluded -- not relevant to whether a posting is a good fit.
 RELEVANT_SECTIONS = ["Education", "Technical Skills", "Professional Experience", "AI/ML Projects"]
-
-
-def _strip_comments(text: str) -> str:
-    return re.sub(r"(?<!\\)%.*", "", text)
 
 
 def _clean_inline(text: str) -> str:
@@ -43,41 +41,9 @@ def _clean_inline(text: str) -> str:
     return text
 
 
-def _extract_command_args(text: str, command: str, num_args: int) -> list[tuple[int, int, list[str]]]:
-    """Find every `\\command{arg1}{arg2}...` occurrence (brace-matched, so
-    nested braces in an argument don't break extraction) and return each
-    match's (start_pos, end_pos, args) -- end_pos is right after the last
-    argument's closing brace.
-    """
-    results = []
-    for m in re.finditer(r"\\" + re.escape(command) + r"\b", text):
-        pos = m.end()
-        args = []
-        for _ in range(num_args):
-            while pos < len(text) and text[pos] in " \t\n":
-                pos += 1
-            if pos >= len(text) or text[pos] != "{":
-                break
-            depth = 0
-            start = pos
-            while pos < len(text):
-                if text[pos] == "{":
-                    depth += 1
-                elif text[pos] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        pos += 1
-                        break
-                pos += 1
-            args.append(text[start + 1 : pos - 1])
-        if len(args) == num_args:
-            results.append((m.start(), pos, args))
-    return results
-
-
 def _section_slices(text: str) -> list[tuple[str, str]]:
     """Split the document into (section_name, section_body_text) pairs, in order."""
-    headers = _extract_command_args(text, "section", 1)
+    headers = extract_command_args(text, "section", 1)
     slices = []
     for i, (_, end_pos, (name,)) in enumerate(headers):
         # body runs from just after this \section{...} call to the start of the next one
@@ -95,7 +61,7 @@ def _render_section_body(name: str, body: str) -> str:
         # \textbf{...} nested inside it), then render each `\\`-separated
         # skill line on its own line instead of one clean() pass jamming
         # them together.
-        items = _extract_command_args(body, "item", 1)
+        items = extract_command_args(body, "item", 1)
         content = items[0][2][0] if items else body
         lines = [_clean_inline(line) for line in content.split("\\\\")]
         return "\n".join(line for line in lines if line)
@@ -105,7 +71,7 @@ def _render_section_body(name: str, body: str) -> str:
     commands = {"resumeSubheading": 4, "resumeItem": 1, "resumeProjectHeading": 2}
     found = []
     for cmd, nargs in commands.items():
-        for pos, _, args in _extract_command_args(body, cmd, nargs):
+        for pos, _, args in extract_command_args(body, cmd, nargs):
             found.append((pos, cmd, args))
     found.sort(key=lambda x: x[0])
 
@@ -134,7 +100,7 @@ def build_profile_summary(tex_path: Path = BASELINE_RESUME) -> str:
     sections, for use in the fit-scorer prompt.
     """
     raw = tex_path.read_text()
-    raw = _strip_comments(raw)
+    raw = strip_comments(raw)
 
     parts = []
     for name, body in _section_slices(raw):

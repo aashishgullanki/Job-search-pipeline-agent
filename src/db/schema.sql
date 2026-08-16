@@ -21,8 +21,12 @@ CREATE TABLE IF NOT EXISTS scores (
 
 CREATE TABLE IF NOT EXISTS tailored (
     posting_id INTEGER NOT NULL REFERENCES postings(id),
-    resume_pdf_path TEXT,
+    status TEXT NOT NULL,              -- 'tailored' (success) | 'failed' (exhausted compile retries)
+    resume_pdf_path TEXT,              -- NULL if status = 'failed'
+    resume_tex_path TEXT,              -- kept alongside the PDF for review even on success
     outreach_draft TEXT,
+    attempts INTEGER NOT NULL,         -- how many compile attempts this took (<= MAX_COMPILE_ATTEMPTS)
+    failure_reason TEXT,               -- NULL unless status = 'failed'
     tailored_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (posting_id)
 );

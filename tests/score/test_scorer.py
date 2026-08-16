@@ -4,40 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.score.scorer import (
-    SCORE_TOOL,
-    _extract_description,
-    build_scoring_prompt,
-    parse_tool_response,
-    score_posting,
-)
-
-# --- _extract_description ---
-
-
-def test_extract_description_prefers_content_field():
-    assert _extract_description({"content": "<p>Hello</p>"}) == "Hello"
-
-
-def test_extract_description_falls_back_to_description_text():
-    assert _extract_description({"descriptionText": "Plain text here"}) == "Plain text here"
-
-
-def test_extract_description_falls_back_to_description_html():
-    assert _extract_description({"descriptionHtml": "<p>HTML &amp; stuff</p>"}) == "HTML & stuff"
-
-
-def test_extract_description_returns_none_when_missing():
-    # Workday's cxs/jobs list endpoint never includes a description at all.
-    assert _extract_description({"title": "Foo", "externalPath": "/job/x"}) is None
-
-
-def test_extract_description_strips_tags_and_collapses_whitespace():
-    result = _extract_description({"content": "<p>Line one</p>\n\n<p>Line   two</p>"})
-    assert result == "Line one Line two"
-
+from src.score.scorer import SCORE_TOOL, build_scoring_prompt, parse_tool_response, score_posting
 
 # --- build_scoring_prompt ---
+# (extract_description itself is tested in tests/common/test_text.py, where
+# the function now lives)
 
 
 def test_prompt_includes_profile_and_job_fields():
