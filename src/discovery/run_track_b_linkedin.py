@@ -1,7 +1,7 @@
 """CLI entry point: Track B discovery via the Apify LinkedIn jobs scraper.
 
-Requires an Apify API token (env var APIFY_TOKEN, or a .env file -- see
-.env.example). Reuses the exact same store.insert_new_postings dedup logic
+Requires an Apify API token (env var APIFY_TOKEN, or a .env file in the
+repo root). Reuses the exact same store.insert_new_postings dedup logic
 as Track A/C; the only new code here is the Apify call and the
 normalize_linkedin_job mapping (src/discovery/normalize.py).
 
