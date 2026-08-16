@@ -140,6 +140,81 @@ def test_enforce_coursework_annotations_does_not_affect_non_coursework_items():
     assert fixed[0]["items"] == ["Python"]  # Python never had an annotation to restore
 
 
+# --- validate_no_block_reorder_claims ---
+# Regex set was checked against all 210 real summary lines from a live
+# 29-posting run before being wired in: exactly the real Point72 line
+# matched, zero false positives. That real line is the primary case here;
+# the rest cover phrasing variants and the "don't false-positive on
+# legitimate within-block language" side.
+
+
+def test_rejects_the_actual_live_point72_claim():
+    # The exact line that triggered this fix, found via a manual
+    # comparison-report audit, not by any test.
+    summary = [
+        "Reordered project blocks so AI Portfolio Agent (LLMs, RAG, scikit-learn) leads over "
+        "ML Trading Strategy block, since posting centers on NLP/LLM/RAG work over general ML."
+    ]
+    with pytest.raises(ValueError, match="block/section-level reorder"):
+        rt.validate_no_block_reorder_claims(summary)
+
+
+def test_rejects_block_order_phrasing():
+    with pytest.raises(ValueError, match="block/section-level reorder"):
+        rt.validate_no_block_reorder_claims(["Changed the block order to prioritize AI projects."])
+
+
+def test_rejects_moved_block_before_phrasing():
+    with pytest.raises(ValueError, match="block/section-level reorder"):
+        rt.validate_no_block_reorder_claims(["Moved the AI Portfolio Agent block before the ML Trading block."])
+
+
+def test_rejects_swapped_section_order_phrasing():
+    with pytest.raises(ValueError, match="block/section-level reorder"):
+        rt.validate_no_block_reorder_claims(["Swapped the order of the Experience and Projects sections."])
+
+
+def test_accepts_legitimate_within_block_reorder_phrasing():
+    # Real phrasing pulled from the live run -- refers to a specific
+    # block_N id, not a claim about relative block/section position.
+    summary = [
+        "Reordered block_0 to lead with the Kafka-based tariff classification service bullet "
+        "-- posting emphasizes distributed systems, data pipelines, and infrastructure.",
+        "Reordered Technical Skills to lead with AI/ML category since this is a Machine "
+        "Learning Engineer posting.",
+        "Kept bullet counts identical per block; no bullets added or dropped.",
+    ]
+    rt.validate_no_block_reorder_claims(summary)  # should not raise
+
+
+def test_accepts_full_real_corpus_from_live_run():
+    # All 210 real summary lines from the live 29-posting run except the
+    # two known-bad Point72 lines -- every one of these must pass clean.
+    # (A first-pass version of the regex set only caught one of the two;
+    # the second -- "Moved Epic and Centene blocks after project blocks"
+    # -- surfaced once a singular/plural bug in the patterns was fixed,
+    # confirming the fix genuinely improved detection, not just satisfied
+    # the one line that prompted it.)
+    from tests.fixtures.real_tailoring_summaries import REAL_SUMMARY_LINES
+
+    known_bad_fragments = ["leads over ml trading strategy", "moved epic and centene blocks after project blocks"]
+    safe_lines = [
+        l for l in REAL_SUMMARY_LINES if not any(frag in l.lower() for frag in known_bad_fragments)
+    ]
+    assert len(safe_lines) == len(REAL_SUMMARY_LINES) - 2  # confirms both known-bad lines were actually excluded
+    rt.validate_no_block_reorder_claims(safe_lines)  # should not raise
+
+
+def test_rejects_the_second_point72_claim_caught_after_the_plural_fix():
+    summary = [
+        "Moved Epic and Centene blocks after project blocks in relevance ordering (kept bullet "
+        "content intact) since they show software engineering rigor and collaborative mindset "
+        "but are less directly NLP-relevant."
+    ]
+    with pytest.raises(ValueError, match="block/section-level reorder"):
+        rt.validate_no_block_reorder_claims(summary)
+
+
 # --- build_tailor_prompt ---
 
 
@@ -387,6 +462,24 @@ def test_tailor_and_compile_retries_when_llm_proposes_fabricated_skill(monkeypat
     assert result["status"] == "tailored"
     assert result["attempts"] == 2
     assert "Kubernetes" in client.messages.prompts_sent[1]  # retry feedback names the offending skill
+
+
+def test_tailor_and_compile_retries_when_summary_claims_block_reorder(monkeypatch, tmp_path, patch_base_resume):
+    bad_payload = _valid_payload()
+    bad_payload["tailoring_summary"] = [
+        "Reordered project blocks so block_1 leads over block_0 section, since it's more relevant."
+    ]
+    good_payload = _valid_payload()  # legitimate summary
+    client = FakeClient([_tool_response(bad_payload), _tool_response(good_payload)])
+    monkeypatch.setattr(rt, "compile_tex_to_pdf", _fake_compile_factory(returncode=0))
+    monkeypatch.setattr(rt, "get_pdf_page_count", lambda path: 1)
+
+    result = rt.tailor_and_compile(client, 1, "Acme", "SWE", "NYC", {}, output_dir=tmp_path)
+
+    assert result["status"] == "tailored"
+    assert result["attempts"] == 2
+    # retry feedback surfaces the actual rejected claim, not a generic message
+    assert "leads over" in client.messages.prompts_sent[1]
 
 
 def test_tailor_and_compile_preserves_coursework_annotation_end_to_end(monkeypatch, tmp_path, patch_base_resume):

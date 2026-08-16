@@ -24,13 +24,19 @@ brace-matcher, and the LLM's structured response is spliced back into the
 *original* document at those exact positions. This was a deliberate choice
 over having the LLM regenerate the whole .tex file -- one wrong brace or a
 "helpful" structural change would silently corrupt the document, with no
-clean way to test that deterministically. Two hard guardrails enforce the
-skill's "never fabricate" rule programmatically, not just via prompt
-instruction: any skill item the LLM proposes that doesn't already appear
-somewhere in the original resume's skills or bullets is rejected outright
-(triggering a retry, not a silent fabrication), and any item that carried
-a "(coursework: ...)" annotation in the original keeps that annotation
-even if the LLM's response drops it.
+clean way to test that deterministically. Three hard guardrails enforce
+rules programmatically, not just via prompt instruction: any skill item
+the LLM proposes that doesn't already appear somewhere in the original
+resume's skills or bullets is rejected outright (triggering a retry, not
+a silent fabrication); any item that carried a "(coursework: ...)"
+annotation in the original keeps that annotation even if the LLM's
+response drops it; and any tailoring_summary line claiming a block/
+section-level reorder is rejected, since the splice architecture only
+ever reorders bullets within a fixed block and never blocks/sections
+relative to each other -- found live (Point72's "NLP / AI Engineer"
+summary claimed "reordered project blocks" when the actual document's
+block order never changed) via a manual comparison-report audit across
+29 postings, not caught by the original test suite.
 """
 
 import re
@@ -175,6 +181,42 @@ def validate_no_fabricated_skills(new_categories: list[dict], known_tokens: set[
             )
 
 
+# Found live: Point72's "NLP / AI Engineer" tailoring_summary claimed
+# "Reordered project blocks so AI Portfolio Agent... leads over ML Trading
+# Strategy block" -- the splice architecture only ever reorders bullets
+# WITHIN a block, never blocks/sections relative to each other, so this
+# described something structurally impossible. Tested against all 210 real
+# summary lines from a live 29-posting run before wiring in: exactly this
+# one line matched, zero false positives against legitimate phrasing like
+# "Reordered block_0 to lead with..." (a specific block ID, not a claim
+# about relative block/section position).
+_BLOCK_REORDER_CLAIM_PATTERNS = [
+    re.compile(r"reorder(?:ed|ing)?\s+(?:the\s+)?(?:project\s+)?blocks\b", re.IGNORECASE),
+    re.compile(r"reorder(?:ed|ing)?\s+(?:the\s+)?sections\b", re.IGNORECASE),
+    re.compile(r"\bblocks?\s+order\b", re.IGNORECASE),
+    re.compile(r"\bsections?\s+order\b", re.IGNORECASE),
+    re.compile(r"mov(?:ed|ing)\s+[\w\s]{2,40}\bblocks?\b\s+(?:before|after|above|below|ahead of)", re.IGNORECASE),
+    re.compile(r"swap(?:ped|ping)?\s+(?:the\s+)?(?:order of\s+)?[\w\s]{2,40}\b(?:blocks?|sections?)\b", re.IGNORECASE),
+    re.compile(r"leads?\s+over\s+[\w\s]{2,40}\b(?:blocks?|sections?|projects?)\b", re.IGNORECASE),
+]
+
+
+def validate_no_block_reorder_claims(tailoring_summary: list[str]) -> None:
+    """Reject a summary line claiming a block/section-level reorder -- the
+    splice architecture can't do that, only reorder bullets within a fixed
+    block, so a claim like this is either wrong or describes a change that
+    didn't actually happen in the document.
+    """
+    for line in tailoring_summary:
+        for pattern in _BLOCK_REORDER_CLAIM_PATTERNS:
+            if pattern.search(line):
+                raise ValueError(
+                    "tailoring_summary claims a block/section-level reorder, which this "
+                    f"architecture cannot do (only bullets within a block are ever reordered, "
+                    f"never blocks or sections relative to each other): {line!r}"
+                )
+
+
 def enforce_coursework_annotations(new_categories: list[dict], original_categories: list[dict]) -> list[dict]:
     """A skill originally flagged '(coursework: ...)' must keep that
     annotation even if the LLM's response dropped it -- auto-corrected
@@ -267,12 +309,16 @@ STEP 3 -- Rewrite bullets, per block:
 - Lead with strong action verbs.
 - Incorporate RED and BLUE keywords naturally -- don't just append them awkwardly.
 - Use quantified results wherever the original had them -- NEVER invent numbers.
-- Reorder bullets within each block so the most relevant to this posting come first.
+- Reorder bullets WITHIN each block so the most relevant to this posting come first.
 - NEVER fabricate skills, technologies, or achievements not present in the original bullet.
 - NEVER copy job description language verbatim as if it's the candidate's own accomplishment.
 - Keep each bullet roughly the same length as the original -- this resume must fit exactly one page.
 - Return the SAME number of bullets per block as given (reordered/reworded, not added or dropped) \
 unless you are told otherwise below because a previous attempt overflowed one page.
+- IMPORTANT: the blocks themselves (each Experience or Project entry) stay in the exact order \
+given -- you can only reorder the bullets inside a block, never move a whole block/project/section \
+ahead of or behind another one. If a project block feels less relevant than another, express that \
+by how much you reword its bullets toward or away from the posting, not by claiming to have moved it.
 
 STEP 4 -- Update Technical Skills: reorder/recategorize the given categories to surface what's \
 most relevant to this posting first. You may ONLY include a skill/tool/language that ALREADY \
@@ -284,7 +330,10 @@ coursework.
 
 STEP 5 -- Produce a short "Tailoring Summary": a list of the key changes made and why (e.g. \
 "Reordered the Kafka bullet to lead in the C. Mack Solutions block -- posting emphasizes \
-distributed systems").
+distributed systems"). Only describe changes you actually made: bullet reordering/rewording \
+within a block, and Technical Skills changes. NEVER describe reordering blocks, sections, or \
+projects relative to each other -- that's not something this process does, so don't claim it \
+happened even if it would have made sense to do.
 
 Also draft a short, generic cold-outreach message (not addressed to a specific named person -- \
 no contact was looked up for this posting; address it generically, e.g. "Hi,").
@@ -512,10 +561,11 @@ def tailor_and_compile(
 ) -> dict:
     """Full-fidelity tailor: per-block bullet reorder/reword, Technical
     Skills update (validated against fabrication, coursework-annotation
-    preserved), tailoring summary, splice into the original .tex, compile
-    to a one-page PDF -- retrying up to `max_attempts` times with the real
-    failure fed back each time (compile error, current page count, or a
-    named fabricated-skill rejection).
+    preserved), tailoring summary (validated against claiming an impossible
+    block-level reorder), splice into the original .tex, compile to a
+    one-page PDF -- retrying up to `max_attempts` times with the real
+    failure fed back each time (compile error, current page count, a named
+    fabricated-skill rejection, or a named block-reorder-claim rejection).
 
     Returns {"status": "tailored", "pdf_path", "tex_path", "outreach_draft",
     "tailoring_summary", "attempts"} on success, or {"status": "failed",
@@ -563,6 +613,7 @@ def tailor_and_compile(
             result = parse_tailor_response(response, blocks, allow_fewer_bullets=saw_overflow)
             new_categories = enforce_coursework_annotations(result["skills"], original_categories)
             validate_no_fabricated_skills(new_categories, known_tokens, known_bullet_text)
+            validate_no_block_reorder_claims(result["tailoring_summary"])
         except ValueError as e:
             last_error = f"invalid tool response: {e}"
             feedback = str(e)
