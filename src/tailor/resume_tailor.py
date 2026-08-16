@@ -1,28 +1,36 @@
-"""Tailor stage: rewrite resume bullets via Claude Sonnet for score>=8
-postings, splice them back into the base .tex, compile to a one-page PDF
-via pdflatex with up to 3 retries on overflow/compile errors (architecture
-doc section 5).
+"""Tailor stage: rewrite a resume for score>=8 postings using the real
+resume-tailor skill's methodology, compile to a one-page PDF via pdflatex
+with up to 3 retries on overflow/compile errors (architecture doc section 5).
 
-No "resume-tailor skill" exists anywhere on this machine to reuse verbatim
-(checked -- like the Portfolio Agent Apify code the architecture doc
-referenced, this turned out to be aspirational, not present), so the
-tailoring approach here is built from scratch:
+No skill existed anywhere obviously discoverable on this machine at first
+look -- checked ~/.claude/skills (doesn't exist) and got a false negative
+from a first-pass filename search. A slower background search later turned
+up the real one: ~/Downloads/resume-tailor.yaml, which despite its
+extension is actually a zip archive containing resume-tailor/SKILL.md -- a
+keyword-categorization methodology from a career-services skill (RED =
+technical skills, BLUE = soft skills, YELLOW = tools/frameworks, GREEN =
+hard requirements), instructing bullet reordering within each experience
+(most relevant first), Technical Skills updates with genuinely-known tools,
+strong action verbs, no fabrication ever, and a required "Tailoring
+Summary" of changes made. This module implements that methodology --
+extended per explicit direction to go for full fidelity rather than a
+simplified version.
 
-- Bullets, not the whole file, are what an LLM touches. The base .tex is
-  parsed with src/common/latex.py's brace-matcher to find every
-  \\resumeItem{...} call's exact position; Sonnet only ever sees and
-  returns bullet TEXT (never raw LaTeX syntax to write), which get spliced
-  back into the *original* document at those exact positions. This avoids
-  the far riskier "have the LLM regenerate the whole .tex file" approach,
-  where one wrong brace or a "helpful" structural change silently breaks
-  the document.
-- escape_latex_specials() is a defensive second pass on whatever Sonnet
-  returns, regardless of whether the system prompt's escaping instruction
-  was followed -- a forgotten "\\%" shouldn't be able to break a compile.
-- The compile-loop retries by giving Sonnet the ACTUAL failure back
-  (the real pdflatex error line, or "still N pages, must be 1") rather
-  than just re-asking blind -- each retry attempt is materially more
-  informed than the last, not just a repeat roll.
+Architecture: the LLM never touches raw LaTeX syntax, only structured
+content (bullet text per block, skill categories, a summary). Positions of
+every \\resumeSubheading / \\resumeProjectHeading / \\resumeItem /
+Technical-Skills-\\item block are found via src/common/latex.py's
+brace-matcher, and the LLM's structured response is spliced back into the
+*original* document at those exact positions. This was a deliberate choice
+over having the LLM regenerate the whole .tex file -- one wrong brace or a
+"helpful" structural change would silently corrupt the document, with no
+clean way to test that deterministically. Two hard guardrails enforce the
+skill's "never fabricate" rule programmatically, not just via prompt
+instruction: any skill item the LLM proposes that doesn't already appear
+somewhere in the original resume's skills or bullets is rejected outright
+(triggering a retry, not a silent fabrication), and any item that carried
+a "(coursework: ...)" annotation in the original keeps that annotation
+even if the LLM's response drops it.
 """
 
 import re
@@ -32,7 +40,12 @@ from pathlib import Path
 import anthropic
 from pypdf import PdfReader
 
-from src.common.latex import escape_latex_specials, extract_command_args
+from src.common.latex import (
+    escape_latex_specials,
+    extract_command_args,
+    split_top_level_commas,
+    unescape_latex_specials,
+)
 from src.common.text import extract_description
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -41,45 +54,11 @@ BASELINE_RESUME = RESUMES_DIR / "Baseline Resume.tex"
 DEFAULT_OUTPUT_DIR = REPO_ROOT / "data" / "tailored"
 
 MODEL = "claude-sonnet-5"  # architecture doc: Sonnet for tailoring (higher quality writing)
-MAX_TOKENS = 2048
+MAX_TOKENS = 4096
 MAX_COMPILE_ATTEMPTS = 3
 PDFLATEX_TIMEOUT_SECONDS = 30
 
-TAILOR_TOOL = {
-    "name": "submit_tailored_content",
-    "description": "Submit the rewritten resume bullets and an outreach draft for this posting.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "bullets": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Rewritten bullets, same count and order as the originals given",
-            },
-            "outreach_draft": {
-                "type": "string",
-                "description": "Short (3-5 sentence) cold-outreach message draft",
-            },
-        },
-        "required": ["bullets", "outreach_draft"],
-    },
-}
-
-SYSTEM_PROMPT = """You are tailoring a candidate's resume bullets for a specific job posting. \
-Rewrite each bullet to emphasize the skills, technologies, and achievements most relevant to \
-this posting -- but NEVER invent facts, numbers, technologies, or achievements not present in \
-the original bullet. Only reword/re-emphasize what's already true. Keep each rewritten bullet \
-roughly the same length as the original -- this resume must fit on exactly one page, so making \
-bullets longer risks overflow. Preserve the exact LaTeX escaping style used in the originals \
-(e.g. \\% for percent signs, \\$ for dollar signs, \\& for ampersands) in your rewritten text.
-
-Also draft a short, generic cold-outreach message -- NOT addressed to any specific named \
-person (no contact was looked up for this posting; address it generically, e.g. "Hi,") -- that \
-the candidate could send to a recruiter or hiring manager they find themselves, referencing \
-genuine fit for this specific role.
-
-Call submit_tailored_content with your rewritten bullets (same count and order as given) and \
-the outreach draft."""
+COURSEWORK_RE = re.compile(r"^(.*?)\s*(\(coursework:[^()]*\))\s*$", re.IGNORECASE)
 
 
 def find_base_resume(company: str, resumes_dir: Path = RESUMES_DIR) -> Path:
@@ -92,35 +71,252 @@ def find_base_resume(company: str, resumes_dir: Path = RESUMES_DIR) -> Path:
     return resumes_dir / "Baseline Resume.tex"
 
 
-def extract_bullets(tex: str) -> list[tuple[int, int, str]]:
-    """Every \\resumeItem{...} call across the whole document, in order, as
-    (start_pos, end_pos, text) -- covers Experience and Projects sections
-    alike, not just one.
-    """
-    return [(s, e, args[0]) for s, e, args in extract_command_args(tex, "resumeItem", 1)]
+# --- extraction -------------------------------------------------------
 
 
-def splice_bullets(tex: str, bullet_positions: list[tuple[int, int, str]], new_bullets: list[str]) -> str:
-    """Replace each \\resumeItem{...} call's content with the corresponding
-    new bullet text. Works back-to-front so replacing one bullet doesn't
-    shift the stored positions of the ones still to come.
+def extract_blocks(tex: str) -> list[dict]:
+    """Group each \\resumeSubheading / \\resumeProjectHeading with the
+    \\resumeItem bullets that immediately follow it, in document order.
+    Each block: {"heading_type", "heading_args", "bullets": [(start,end,text),...]}.
+    Bullets belong to whichever heading precedes them and before the next one.
     """
-    if len(bullet_positions) != len(new_bullets):
-        raise ValueError(
-            f"bullet count mismatch: {len(bullet_positions)} positions, {len(new_bullets)} new bullets"
-        )
-    result = tex
-    for (start, end, _), new_text in reversed(list(zip(bullet_positions, new_bullets))):
-        escaped = escape_latex_specials(new_text.strip())
-        result = result[:start] + f"\\resumeItem{{{escaped}}}" + result[end:]
-    return result
+    headings = []
+    for pos, end, args in extract_command_args(tex, "resumeSubheading", 4):
+        headings.append((pos, end, "resumeSubheading", args))
+    for pos, end, args in extract_command_args(tex, "resumeProjectHeading", 2):
+        headings.append((pos, end, "resumeProjectHeading", args))
+    headings.sort(key=lambda h: h[0])
+
+    all_bullets = extract_command_args(tex, "resumeItem", 1)
+
+    blocks = []
+    for i, (h_start, h_end, h_type, h_args) in enumerate(headings):
+        block_end = headings[i + 1][0] if i + 1 < len(headings) else len(tex)
+        block_bullets = [(s, e, a[0]) for s, e, a in all_bullets if h_end <= s < block_end]
+        if not block_bullets:
+            continue
+        blocks.append({"heading_type": h_type, "heading_args": h_args, "bullets": block_bullets})
+    return blocks
+
+
+def extract_skills_block(tex: str) -> dict | None:
+    """Find the Technical Skills section's \\item{...} content and parse it
+    into categories. Returns {"start", "end", "categories": [{"label","items"}]}
+    (start/end span the \\item{...}'s content, not including the braces
+    themselves) or None if no Technical Skills section/item is found.
+    """
+    sections = extract_command_args(tex, "section", 1)
+    skills_idx = next((i for i, (_, _, (name,)) in enumerate(sections) if name.strip() == "Technical Skills"), None)
+    if skills_idx is None:
+        return None
+
+    body_start = sections[skills_idx][1]
+    body_end = sections[skills_idx + 1][0] if skills_idx + 1 < len(sections) else len(tex)
+    body = tex[body_start:body_end]
+
+    items = extract_command_args(body, "item", 1)
+    if not items:
+        return None
+    item_start, item_end, (content,) = items[0]
+
+    categories = []
+    for line in content.split("\\\\"):
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"\\textbf\{([^{}]*)\}\s*(.*)", line, re.DOTALL)
+        if not m:
+            continue
+        label = unescape_latex_specials(m.group(1)).rstrip(":").strip()
+        raw_items = split_top_level_commas(m.group(2).strip())
+        categories.append({"label": label, "items": [unescape_latex_specials(it) for it in raw_items]})
+
+    return {"start": body_start + item_start, "end": body_start + item_end, "categories": categories}
+
+
+def _split_coursework(item: str) -> tuple[str, str | None]:
+    m = COURSEWORK_RE.match(item)
+    if m:
+        return m.group(1).strip(), m.group(2)
+    return item.strip(), None
+
+
+# --- validation (the "never fabricate" guardrails) ---------------------
+
+
+def build_known_skill_tokens(original_categories: list[dict], blocks: list[dict]) -> tuple[set[str], str]:
+    """Every skill/tool token the candidate's actual resume already
+    establishes -- from the current skills list, and from bullet text
+    (catches tools mentioned in a bullet but not listed in Skills, e.g.
+    "Kafka" appearing in an Experience bullet).
+    """
+    tokens = set()
+    for cat in original_categories:
+        for item in cat["items"]:
+            base, _ = _split_coursework(item)
+            tokens.add(base.lower())
+    bullet_text = " ".join(b[2] for block in blocks for b in block["bullets"]).lower()
+    return tokens, bullet_text
+
+
+def validate_no_fabricated_skills(new_categories: list[dict], known_tokens: set[str], known_bullet_text: str) -> None:
+    for cat in new_categories:
+        for item in cat["items"]:
+            base, _ = _split_coursework(item)
+            base_lower = base.lower().strip()
+            if not base_lower:
+                continue
+            if base_lower in known_tokens or base_lower in known_bullet_text:
+                continue
+            raise ValueError(
+                f"proposed skill '{item}' does not appear anywhere in the original resume "
+                "(skills list or bullets) -- this looks fabricated and was rejected"
+            )
+
+
+def enforce_coursework_annotations(new_categories: list[dict], original_categories: list[dict]) -> list[dict]:
+    """A skill originally flagged '(coursework: ...)' must keep that
+    annotation even if the LLM's response dropped it -- auto-corrected
+    rather than just rejected, since it's a small, deterministic fix.
+    """
+    coursework_by_token: dict[str, str] = {}
+    for cat in original_categories:
+        for item in cat["items"]:
+            base, annotation = _split_coursework(item)
+            if annotation:
+                coursework_by_token[base.lower().strip()] = annotation
+
+    fixed = []
+    for cat in new_categories:
+        fixed_items = []
+        for item in cat["items"]:
+            base, annotation = _split_coursework(item)
+            required = coursework_by_token.get(base.lower().strip())
+            if required and not annotation:
+                item = f"{base} {required}"
+            fixed_items.append(item)
+        fixed.append({"label": cat["label"], "items": fixed_items})
+    return fixed
+
+
+# --- prompt / tool schema ------------------------------------------------
+
+TAILOR_TOOL = {
+    "name": "submit_tailored_content",
+    "description": "Submit the tailored resume content and outreach draft for this posting.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "blocks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "block_id": {"type": "string"},
+                        "bullets": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["block_id", "bullets"],
+                },
+                "description": "One entry per experience/project block, same block_id as given",
+            },
+            "skills": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "items": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["label", "items"],
+                },
+                "description": "Full replacement Technical Skills categories",
+            },
+            "tailoring_summary": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Bullet list of the key changes made and why",
+            },
+            "outreach_draft": {
+                "type": "string",
+                "description": "Short (3-5 sentence) generic cold-outreach message draft",
+            },
+        },
+        "required": ["blocks", "skills", "tailoring_summary", "outreach_draft"],
+    },
+}
+
+SYSTEM_PROMPT = """You are tailoring a candidate's resume for a specific job posting, following \
+this methodology (from a career-services resume-tailoring skill):
+
+CORE PHILOSOPHY
+- Recruiters are not technical -- they scan for keywords matching what the posting asked for.
+- ATS systems filter candidates before any human sees them. Keyword density and relevance matter.
+- It's not about what's impressive to the candidate -- it's about what the posting actually asked for.
+- Soft skills matter as much as technical ones.
+
+STEP 1 -- Annotate the job posting (internally): categorize meaningful phrases into RED \
+(technical skills / transferable technical experience), BLUE (soft skills), YELLOW (specific \
+tools/languages/frameworks), GREEN (hard requirements/must-haves). Don't skip the "About Us" / \
+"About the Role" intro paragraphs -- they carry keywords too.
+
+STEP 2 -- Map those keywords to the candidate's existing experience (given below, grouped into \
+blocks). Not every experience will make the cut -- surface what's most relevant to THIS posting.
+
+STEP 3 -- Rewrite bullets, per block:
+- Lead with strong action verbs.
+- Incorporate RED and BLUE keywords naturally -- don't just append them awkwardly.
+- Use quantified results wherever the original had them -- NEVER invent numbers.
+- Reorder bullets within each block so the most relevant to this posting come first.
+- NEVER fabricate skills, technologies, or achievements not present in the original bullet.
+- NEVER copy job description language verbatim as if it's the candidate's own accomplishment.
+- Keep each bullet roughly the same length as the original -- this resume must fit exactly one page.
+- Return the SAME number of bullets per block as given (reordered/reworded, not added or dropped) \
+unless you are told otherwise below because a previous attempt overflowed one page.
+
+STEP 4 -- Update Technical Skills: reorder/recategorize the given categories to surface what's \
+most relevant to this posting first. You may ONLY include a skill/tool/language that ALREADY \
+appears somewhere in the resume content given to you (the current skills list or some bullet) -- \
+do not add anything not already established. If a given skill item carries a \
+"(coursework: ...)" annotation, any output that includes that same skill must keep that exact \
+annotation -- never let a reorder imply production experience where the original only claimed \
+coursework.
+
+STEP 5 -- Produce a short "Tailoring Summary": a list of the key changes made and why (e.g. \
+"Reordered the Kafka bullet to lead in the C. Mack Solutions block -- posting emphasizes \
+distributed systems").
+
+Also draft a short, generic cold-outreach message (not addressed to a specific named person -- \
+no contact was looked up for this posting; address it generically, e.g. "Hi,").
+
+Call submit_tailored_content with your blocks (same block_id as given), skills (full replacement \
+category list), tailoring_summary, and outreach_draft. Preserve the exact LaTeX escaping style \
+used in the originals (\\% for percent, \\$ for dollar signs, \\& for ampersands)."""
+
+
+def _format_block_for_prompt(i: int, block: dict) -> str:
+    args = block["heading_args"]
+    if block["heading_type"] == "resumeSubheading":
+        org, dates, title, _location = [unescape_latex_specials(a) for a in args]
+        label = f"{org} ({dates}) - {title}" if title else f"{org} ({dates})"
+    else:
+        title_and_tech, dates = [unescape_latex_specials(a) for a in args]
+        label = f"{title_and_tech} ({dates})" if dates else title_and_tech
+    bullets = "\n".join(f"  {j + 1}. {unescape_latex_specials(b[2])}" for j, b in enumerate(block["bullets"]))
+    return f"block_{i} -- {label}\n{bullets}"
 
 
 def build_tailor_prompt(
-    company: str, title: str, location: str, description: str | None, bullets: list[str], feedback: str | None = None
+    company: str,
+    title: str,
+    location: str,
+    description: str | None,
+    blocks: list[dict],
+    skills_categories: list[dict],
+    feedback: str | None = None,
 ) -> str:
-    numbered = "\n".join(f"{i + 1}. {b}" for i, b in enumerate(bullets))
     description_block = description[:3000] if description else "(no description available for this posting)"
+    blocks_block = "\n\n".join(_format_block_for_prompt(i, b) for i, b in enumerate(blocks))
+    skills_lines = "\n".join(f"  {c['label']}: {', '.join(c['items'])}" for c in skills_categories)
     feedback_block = f"\n\nIMPORTANT -- the previous attempt failed: {feedback}\n" if feedback else ""
     return f"""## Job posting
 
@@ -131,27 +327,107 @@ Location: {location}
 Description:
 {description_block}
 
-## Candidate's current resume bullets ({len(bullets)} total -- rewrite ALL of them, same order)
+## Candidate's current resume, by block (rewrite bullets within each block, same block_id, same \
+bullet count unless told otherwise below)
 
-{numbered}
+{blocks_block}
+
+## Candidate's current Technical Skills
+
+{skills_lines}
 {feedback_block}"""
 
 
-def parse_tailor_response(response, expected_bullet_count: int) -> dict:
-    for block in response.content:
-        if getattr(block, "type", None) == "tool_use" and block.name == "submit_tailored_content":
-            data = block.input
-            bullets = data.get("bullets")
+def parse_tailor_response(response, blocks: list[dict], allow_fewer_bullets: bool = False) -> dict:
+    for content_block in response.content:
+        if getattr(content_block, "type", None) == "tool_use" and content_block.name == "submit_tailored_content":
+            data = content_block.input
+            new_blocks = data.get("blocks")
+            new_skills = data.get("skills")
+            summary = data.get("tailoring_summary")
             outreach = data.get("outreach_draft")
-            if not isinstance(bullets, list) or len(bullets) != expected_bullet_count:
-                got = len(bullets) if isinstance(bullets, list) else type(bullets).__name__
-                raise ValueError(f"expected {expected_bullet_count} bullets, got {got}")
-            if not all(isinstance(b, str) and b.strip() for b in bullets):
-                raise ValueError("one or more returned bullets is empty or not a string")
+
+            if not isinstance(new_blocks, list) or len(new_blocks) != len(blocks):
+                got = len(new_blocks) if isinstance(new_blocks, list) else type(new_blocks).__name__
+                raise ValueError(f"expected {len(blocks)} blocks, got {got}")
+
+            by_id = {b.get("block_id"): b.get("bullets") for b in new_blocks}
+            for i, block in enumerate(blocks):
+                block_id = f"block_{i}"
+                bullets = by_id.get(block_id)
+                original_count = len(block["bullets"])
+                if not isinstance(bullets, list) or not bullets:
+                    raise ValueError(f"{block_id}: missing or empty bullets list")
+                if not all(isinstance(b, str) and b.strip() for b in bullets):
+                    raise ValueError(f"{block_id}: one or more bullets is empty or not a string")
+                if allow_fewer_bullets:
+                    if len(bullets) > original_count:
+                        raise ValueError(f"{block_id}: expected at most {original_count} bullets, got {len(bullets)}")
+                elif len(bullets) != original_count:
+                    raise ValueError(f"{block_id}: expected exactly {original_count} bullets, got {len(bullets)}")
+
+            if not isinstance(new_skills, list) or not new_skills:
+                raise ValueError("missing/empty skills in tool response")
+            for cat in new_skills:
+                if not isinstance(cat, dict) or not cat.get("label") or not cat.get("items"):
+                    raise ValueError(f"malformed skills category: {cat!r}")
+
+            if not isinstance(summary, list) or not summary:
+                raise ValueError("missing/empty tailoring_summary")
             if not outreach or not isinstance(outreach, str):
-                raise ValueError("missing/invalid outreach_draft in tool response")
-            return {"bullets": bullets, "outreach_draft": outreach.strip()}
+                raise ValueError("missing/invalid outreach_draft")
+
+            return {
+                "blocks": {f"block_{i}": by_id[f"block_{i}"] for i in range(len(blocks))},
+                "skills": new_skills,
+                "tailoring_summary": summary,
+                "outreach_draft": outreach.strip(),
+            }
     raise ValueError("no submit_tailored_content tool call found in response")
+
+
+# --- splicing ------------------------------------------------------------
+
+
+def splice_tailored_content(
+    tex: str,
+    blocks: list[dict],
+    skills_span: dict | None,
+    new_blocks: dict[str, list[str]],
+    new_skills: list[dict],
+) -> str:
+    """Replace each block's bullet span and the skills \\item{...} content
+    in the original document, working back-to-front by position so earlier
+    replacements don't shift positions still to come.
+    """
+    edits: list[tuple[int, int, str]] = []
+
+    for i, block in enumerate(blocks):
+        new_bullets = new_blocks.get(f"block_{i}")
+        if not new_bullets:
+            continue
+        span_start = block["bullets"][0][0]
+        span_end = block["bullets"][-1][1]
+        rendered = "\n  ".join(f"\\resumeItem{{{escape_latex_specials(b.strip())}}}" for b in new_bullets)
+        edits.append((span_start, span_end, rendered))
+
+    if skills_span and new_skills:
+        rendered_lines = []
+        for cat in new_skills:
+            label = escape_latex_specials(cat["label"])
+            items = ", ".join(escape_latex_specials(it) for it in cat["items"])
+            rendered_lines.append(f"\\textbf{{{label}:}} {items}")
+        rendered = " \\\\\n     ".join(rendered_lines)
+        edits.append((skills_span["start"], skills_span["end"], rendered))
+
+    edits.sort(key=lambda e: e[0], reverse=True)
+    result = tex
+    for start, end, replacement in edits:
+        result = result[:start] + replacement + result[end:]
+    return result
+
+
+# --- compile ------------------------------------------------------------
 
 
 def _slugify(text: str) -> str:
@@ -186,6 +462,9 @@ def get_pdf_page_count(pdf_path: Path) -> int:
     return len(PdfReader(str(pdf_path)).pages)
 
 
+# --- orchestration --------------------------------------------------------
+
+
 def tailor_and_compile(
     client: anthropic.Anthropic,
     posting_id: int,
@@ -196,22 +475,28 @@ def tailor_and_compile(
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     max_attempts: int = MAX_COMPILE_ATTEMPTS,
 ) -> dict:
-    """Rewrite bullets, splice into the base resume, compile to a one-page
-    PDF, retrying up to `max_attempts` times -- each retry is given the
-    real failure reason (compile error or current page count) so it's an
-    informed correction, not a blind re-roll.
+    """Full-fidelity tailor: per-block bullet reorder/reword, Technical
+    Skills update (validated against fabrication, coursework-annotation
+    preserved), tailoring summary, splice into the original .tex, compile
+    to a one-page PDF -- retrying up to `max_attempts` times with the real
+    failure fed back each time (compile error, current page count, or a
+    named fabricated-skill rejection).
 
     Returns {"status": "tailored", "pdf_path", "tex_path", "outreach_draft",
-    "attempts"} on success, or {"status": "failed", "reason", "attempts"}
-    once max_attempts is exhausted without a clean one-page compile.
+    "tailoring_summary", "attempts"} on success, or {"status": "failed",
+    "reason", "attempts"} once max_attempts is exhausted.
     """
     base_path = find_base_resume(company)
     original_tex = base_path.read_text()
-    bullet_positions = extract_bullets(original_tex)
-    if not bullet_positions:
-        return {"status": "failed", "reason": f"no \\resumeItem bullets found in {base_path.name}", "attempts": 0}
 
-    original_bullets = [b[2] for b in bullet_positions]
+    blocks = extract_blocks(original_tex)
+    if not blocks:
+        return {"status": "failed", "reason": f"no resume blocks found in {base_path.name}", "attempts": 0}
+
+    skills_span = extract_skills_block(original_tex)
+    original_categories = skills_span["categories"] if skills_span else []
+    known_tokens, known_bullet_text = build_known_skill_tokens(original_categories, blocks)
+
     description = extract_description(raw_json)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -221,9 +506,10 @@ def tailor_and_compile(
 
     feedback = None
     last_error = "unknown failure"
+    saw_overflow = False
 
     for attempt in range(1, max_attempts + 1):
-        prompt = build_tailor_prompt(company, title, location, description, original_bullets, feedback)
+        prompt = build_tailor_prompt(company, title, location, description, blocks, original_categories, feedback)
         try:
             response = client.messages.create(
                 model=MODEL,
@@ -239,13 +525,15 @@ def tailor_and_compile(
             continue
 
         try:
-            result = parse_tailor_response(response, expected_bullet_count=len(original_bullets))
+            result = parse_tailor_response(response, blocks, allow_fewer_bullets=saw_overflow)
+            new_categories = enforce_coursework_annotations(result["skills"], original_categories)
+            validate_no_fabricated_skills(new_categories, known_tokens, known_bullet_text)
         except ValueError as e:
             last_error = f"invalid tool response: {e}"
             feedback = str(e)
             continue
 
-        new_tex = splice_bullets(original_tex, bullet_positions, result["bullets"])
+        new_tex = splice_tailored_content(original_tex, blocks, skills_span, result["blocks"], new_categories)
         tex_out_path.write_text(new_tex)
 
         try:
@@ -260,17 +548,19 @@ def tailor_and_compile(
             last_error = f"compile error: {error_line}"
             feedback = (
                 f"The previous version failed to compile with this LaTeX error: {error_line}. "
-                "Check special-character escaping in your bullets."
+                "Check special-character escaping."
             )
             continue
 
         page_count = get_pdf_page_count(pdf_out_path)
         if page_count > 1:
+            saw_overflow = True
             last_error = f"resume is {page_count} pages, must be 1"
             feedback = (
                 f"The resume compiled but is currently {page_count} pages -- it must fit on exactly "
-                "1 page. Shorten the bullets significantly, prioritizing the most relevant ones for "
-                "this specific posting over less relevant ones."
+                "1 page. You may now drop the lowest-priority bullet(s) within a block (never below "
+                "1 per block) in addition to shortening bullets, prioritizing what's most relevant to "
+                "this posting."
             )
             continue
 
@@ -279,6 +569,7 @@ def tailor_and_compile(
             "pdf_path": str(pdf_out_path),
             "tex_path": str(tex_out_path),
             "outreach_draft": result["outreach_draft"],
+            "tailoring_summary": result["tailoring_summary"],
             "attempts": attempt,
         }
 

@@ -58,3 +58,37 @@ def escape_latex_specials(text: str) -> str:
     for ch in ["%", "$", "&", "#"]:
         text = re.sub(r"(?<!\\)" + re.escape(ch), "\\" + ch, text)
     return text
+
+
+def unescape_latex_specials(text: str) -> str:
+    """Inverse of escape_latex_specials -- for showing existing .tex content
+    to an LLM in readable form before it gets re-escaped on the way back out.
+    """
+    return text.replace("\\%", "%").replace("\\$", "$").replace("\\&", "&").replace("\\#", "#")
+
+
+def split_top_level_commas(text: str) -> list[str]:
+    """Comma-split that doesn't split inside parentheses.
+
+    Needed for skill lists like "LLM Integration (OpenAI, Anthropic), RAG"
+    -- a naive text.split(",") would wrongly break "(OpenAI" and " Anthropic)"
+    into two separate items.
+    """
+    parts = []
+    depth = 0
+    current = []
+    for ch in text:
+        if ch == "(":
+            depth += 1
+            current.append(ch)
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        parts.append("".join(current).strip())
+    return [p for p in parts if p]

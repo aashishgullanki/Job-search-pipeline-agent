@@ -1,4 +1,10 @@
-from src.common.latex import escape_latex_specials, extract_command_args, strip_comments
+from src.common.latex import (
+    escape_latex_specials,
+    extract_command_args,
+    split_top_level_commas,
+    strip_comments,
+    unescape_latex_specials,
+)
 
 
 def test_strip_comments_removes_comment_to_end_of_line():
@@ -70,3 +76,25 @@ def test_escape_latex_specials_handles_mixed_escaped_and_unescaped():
     assert "50\\%" in result  # already escaped, untouched
     assert "\\$10K" in result  # was unescaped, now escaped
     assert "R\\&D" in result  # was unescaped, now escaped
+
+
+def test_unescape_latex_specials_is_the_inverse():
+    assert unescape_latex_specials("50\\% and \\$10K for R\\&D \\#1") == "50% and $10K for R&D #1"
+
+
+def test_split_top_level_commas_basic():
+    assert split_top_level_commas("Python, Go, Rust") == ["Python", "Go", "Rust"]
+
+
+def test_split_top_level_commas_does_not_split_inside_parens():
+    result = split_top_level_commas("LLM Integration (OpenAI, Anthropic), RAG, Prompt Engineering")
+    assert result == ["LLM Integration (OpenAI, Anthropic)", "RAG", "Prompt Engineering"]
+
+
+def test_split_top_level_commas_handles_coursework_annotation():
+    result = split_top_level_commas("SQL, R, C++ (coursework: Data Structures & Algorithms)")
+    assert result == ["SQL", "R", "C++ (coursework: Data Structures & Algorithms)"]
+
+
+def test_split_top_level_commas_strips_whitespace_and_drops_empties():
+    assert split_top_level_commas("Python,  , Go ,") == ["Python", "Go"]

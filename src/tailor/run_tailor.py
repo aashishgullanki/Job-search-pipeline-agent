@@ -57,10 +57,18 @@ def run(db_path: Path = DEFAULT_DB_PATH, threshold: int = TAILOR_SCORE_THRESHOLD
         label = f"[{row['score']}/10] {row['company']} — {row['title']}"
         if result["status"] == "tailored":
             record_tailored_success(
-                conn, row["id"], result["pdf_path"], result["tex_path"], result["outreach_draft"], result["attempts"]
+                conn,
+                row["id"],
+                result["pdf_path"],
+                result["tex_path"],
+                result["outreach_draft"],
+                result["tailoring_summary"],
+                result["attempts"],
             )
             successes += 1
             print(f"{label}: tailored in {result['attempts']} attempt(s) -> {result['pdf_path']}")
+            for change in result["tailoring_summary"]:
+                print(f"    - {change}")
         else:
             record_tailored_failure(conn, row["id"], result["reason"], result["attempts"])
             failures.append((label, result["reason"]))

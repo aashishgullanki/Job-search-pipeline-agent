@@ -51,7 +51,7 @@ def test_only_returns_postings_at_or_above_threshold(conn):
 def test_excludes_postings_already_in_tailored_table(conn):
     id_a = _insert_scored_posting(conn, "a", score=9)
     _insert_scored_posting(conn, "b", score=9)
-    record_tailored_success(conn, id_a, "/path/a.pdf", "/path/a.tex", "outreach", attempts=1)
+    record_tailored_success(conn, id_a, "/path/a.pdf", "/path/a.tex", "outreach", ["change 1"], attempts=1)
 
     result = get_untailored_high_scoring_postings(conn, threshold=8)
 
@@ -84,13 +84,16 @@ def test_custom_threshold_is_respected(conn):
 def test_record_tailored_success_stores_all_fields(conn):
     id_a = _insert_scored_posting(conn, "a", score=9)
 
-    record_tailored_success(conn, id_a, "/out/a.pdf", "/out/a.tex", "Hi there,", attempts=2)
+    record_tailored_success(
+        conn, id_a, "/out/a.pdf", "/out/a.tex", "Hi there,", ["Reordered bullet X", "Added skill Y"], attempts=2
+    )
 
     row = conn.execute("SELECT * FROM tailored WHERE posting_id = ?", (id_a,)).fetchone()
     assert row["status"] == "tailored"
     assert row["resume_pdf_path"] == "/out/a.pdf"
     assert row["resume_tex_path"] == "/out/a.tex"
     assert row["outreach_draft"] == "Hi there,"
+    assert row["tailoring_summary"] == "Reordered bullet X\nAdded skill Y"
     assert row["attempts"] == 2
     assert row["failure_reason"] is None
 

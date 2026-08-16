@@ -6,4 +6,6 @@ venv/
 .env
 data/*.db
 data/*.sqlite3
+data/review_list.md
 data/tailored/*.pdf
+data/tailored/*.tex

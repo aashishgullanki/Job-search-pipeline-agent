@@ -30,12 +30,14 @@ def record_tailored_success(
     pdf_path: str,
     tex_path: str,
     outreach_draft: str,
+    tailoring_summary: list[str],
     attempts: int,
 ) -> None:
     conn.execute(
-        """INSERT INTO tailored (posting_id, status, resume_pdf_path, resume_tex_path, outreach_draft, attempts)
-           VALUES (?, 'tailored', ?, ?, ?, ?)""",
-        (posting_id, pdf_path, tex_path, outreach_draft, attempts),
+        """INSERT INTO tailored
+           (posting_id, status, resume_pdf_path, resume_tex_path, outreach_draft, tailoring_summary, attempts)
+           VALUES (?, 'tailored', ?, ?, ?, ?, ?)""",
+        (posting_id, pdf_path, tex_path, outreach_draft, "\n".join(tailoring_summary), attempts),
     )
     conn.commit()
 

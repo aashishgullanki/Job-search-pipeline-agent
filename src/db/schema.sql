@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS tailored (
     resume_pdf_path TEXT,              -- NULL if status = 'failed'
     resume_tex_path TEXT,              -- kept alongside the PDF for review even on success
     outreach_draft TEXT,
+    tailoring_summary TEXT,            -- newline-joined list of changes made and why (skill's required output)
     attempts INTEGER NOT NULL,         -- how many compile attempts this took (<= MAX_COMPILE_ATTEMPTS)
     failure_reason TEXT,               -- NULL unless status = 'failed'
     tailored_at TEXT NOT NULL DEFAULT (datetime('now')),
