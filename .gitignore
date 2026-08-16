@@ -9,3 +9,6 @@ data/*.sqlite3
 data/review_list.md
 data/tailored/*.pdf
 data/tailored/*.tex
+data/tailored/*.aux
+data/tailored/*.log
+data/tailored/*.out

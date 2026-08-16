@@ -265,6 +265,22 @@ def test_splice_replaces_bullets_and_skills_preserving_the_rest():
     assert "\\end{document}" in result
 
 
+def test_splice_preserves_the_item_wrapper_around_skills_content():
+    # Regression test: found live, every single tailored posting failed to
+    # compile with "! LaTeX Error: ... missing \item" because the skills
+    # replacement dropped the \item{...} wrapper entirely, leaving the
+    # itemize environment with no \item command inside it at all.
+    blocks = rt.extract_blocks(SAMPLE_TEX)
+    skills_span = rt.extract_skills_block(SAMPLE_TEX)
+    new_skills = [{"label": "Languages", "items": ["Python"]}]
+
+    result = rt.splice_tailored_content(SAMPLE_TEX, blocks, skills_span, {}, new_skills)
+
+    assert "\\item{\\textbf{Languages:} Python}" in result
+    # and the surrounding \small{...} wrapper (untouched, outside the spliced span) survives
+    assert "\\small{\\item{\\textbf{Languages:} Python}}" in result
+
+
 def test_splice_escapes_unescaped_specials():
     blocks = rt.extract_blocks(SAMPLE_TEX)
     new_blocks = {"block_0": ["Cut cost by 30% and $50K saved", "b"], "block_1": ["c"]}
@@ -283,6 +299,29 @@ def test_extract_latex_error_finds_bang_line():
 
 def test_slugify_sanitizes_special_characters():
     assert rt._slugify("Acme Corp! - SWE, Backend (NYC)") == "Acme_Corp_SWE_Backend_NYC"
+
+
+# --- find_pdflatex ---
+
+
+def test_find_pdflatex_prefers_path(monkeypatch):
+    monkeypatch.setattr(rt.shutil, "which", lambda name: "/usr/bin/pdflatex")
+    assert rt.find_pdflatex() == "/usr/bin/pdflatex"
+
+
+def test_find_pdflatex_falls_back_to_known_install_locations(monkeypatch):
+    # Simulates the real situation hit live: a fresh BasicTeX install whose
+    # PATH update hasn't propagated to this process.
+    monkeypatch.setattr(rt.shutil, "which", lambda name: None)
+    monkeypatch.setattr(rt.Path, "exists", lambda self: str(self) == "/Library/TeX/texbin/pdflatex")
+    assert rt.find_pdflatex() == "/Library/TeX/texbin/pdflatex"
+
+
+def test_find_pdflatex_raises_actionable_error_when_nowhere_found(monkeypatch):
+    monkeypatch.setattr(rt.shutil, "which", lambda name: None)
+    monkeypatch.setattr(rt.Path, "exists", lambda self: False)
+    with pytest.raises(FileNotFoundError, match="brew install"):
+        rt.find_pdflatex()
 
 
 # --- tailor_and_compile (fully mocked orchestration) ---
@@ -404,3 +443,34 @@ def test_tailor_and_compile_fails_immediately_when_no_blocks_found(monkeypatch, 
     assert result["status"] == "failed"
     assert result["attempts"] == 0
     assert "no resume blocks" in result["reason"]
+
+
+# --- real pdflatex compile (the class of bug mocked tests structurally can't
+# catch -- the "missing \item" regression above passed every mocked test and
+# only showed up against a real compile) ---
+
+
+def _pdflatex_available() -> bool:
+    try:
+        rt.find_pdflatex()
+        return True
+    except FileNotFoundError:
+        return False
+
+
+@pytest.mark.skipif(not _pdflatex_available(), reason="pdflatex not installed in this environment")
+def test_spliced_output_actually_compiles_with_real_pdflatex(tmp_path):
+    blocks = rt.extract_blocks(SAMPLE_TEX)
+    skills_span = rt.extract_skills_block(SAMPLE_TEX)
+    new_blocks = {"block_0": ["Rewritten A", "Rewritten B"], "block_1": ["Rewritten C"]}
+    new_skills = [{"label": "Languages", "items": ["Python", "Go"]}]
+
+    spliced = rt.splice_tailored_content(SAMPLE_TEX, blocks, skills_span, new_blocks, new_skills)
+    tex_path = tmp_path / "test.tex"
+    tex_path.write_text(spliced)
+
+    result = rt.compile_tex_to_pdf(tex_path)
+
+    assert result.returncode == 0, result.stdout[-1500:]
+    assert (tmp_path / "test.pdf").exists()
+    assert rt.get_pdf_page_count(tmp_path / "test.pdf") == 1

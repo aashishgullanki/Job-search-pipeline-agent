@@ -34,6 +34,7 @@ even if the LLM's response drops it.
 """
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -417,7 +418,13 @@ def splice_tailored_content(
             label = escape_latex_specials(cat["label"])
             items = ", ".join(escape_latex_specials(it) for it in cat["items"])
             rendered_lines.append(f"\\textbf{{{label}:}} {items}")
-        rendered = " \\\\\n     ".join(rendered_lines)
+        # skills_span covers the WHOLE \item{...} call (extract_skills_block
+        # returns extract_command_args' span, which starts at "\item" itself,
+        # not just its inner content) -- the replacement must re-wrap in
+        # \item{...} or the itemize environment ends up with no \item command
+        # in it at all. Found live: every single tailored posting failed to
+        # compile with "missing \item" before this fix.
+        rendered = "\\item{" + " \\\\\n     ".join(rendered_lines) + "}"
         edits.append((skills_span["start"], skills_span["end"], rendered))
 
     edits.sort(key=lambda e: e[0], reverse=True)
@@ -429,16 +436,44 @@ def splice_tailored_content(
 
 # --- compile ------------------------------------------------------------
 
+# Common macOS TeX install locations, checked when a bare "pdflatex" isn't
+# on PATH -- e.g. a fresh BasicTeX/MacTeX install whose path_helper update
+# hasn't propagated to an already-running shell (this harness doesn't
+# persist env vars between tool calls at all, so relying on the caller's
+# PATH being right is fragile regardless).
+_PDFLATEX_FALLBACK_PATHS = [
+    "/Library/TeX/texbin/pdflatex",
+    "/usr/local/texlive/2026basic/bin/universal-darwin/pdflatex",
+    "/usr/local/bin/pdflatex",
+]
+
 
 def _slugify(text: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_")
     return slug[:120] or "untitled"
 
 
+def find_pdflatex() -> str:
+    """Resolve the pdflatex binary: PATH first, then known install
+    locations. Raises FileNotFoundError with an actionable message if
+    neither turns anything up.
+    """
+    on_path = shutil.which("pdflatex")
+    if on_path:
+        return on_path
+    for candidate in _PDFLATEX_FALLBACK_PATHS:
+        if Path(candidate).exists():
+            return candidate
+    raise FileNotFoundError(
+        "pdflatex not found on PATH or in known install locations -- "
+        "install a LaTeX distribution (e.g. `brew install --cask basictex`)"
+    )
+
+
 def compile_tex_to_pdf(tex_path: Path, timeout: int = PDFLATEX_TIMEOUT_SECONDS) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
-            "pdflatex",
+            find_pdflatex(),
             "-interaction=nonstopmode",
             "-halt-on-error",
             "-output-directory",
