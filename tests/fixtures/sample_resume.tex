@@ -1,0 +1,55 @@
+\documentclass[letterpaper,11pt]{article}
+\usepackage{fullpage}
+
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-2pt}}
+  }
+}
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-1pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      #3 & \textit{\small #4} \\
+    \end{tabular*}\vspace{-5pt}
+}
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & #2 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\begin{document}
+
+\begin{center}
+    \textbf{\Huge \scshape Test Candidate} \\ \vspace{3pt}
+    \small test@example.com
+\end{center}
+
+\section{Education}
+\resumeSubheading
+  {Test University}{Graduation: May 2027}
+  {Bachelor of Science in Computer Science}{GPA: 3.9/4.0}
+
+\section{Technical Skills}
+\begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+     \textbf{Languages:} Python, Go \\
+     \textbf{AI/ML:} PyTorch, RAG
+    }}
+\end{itemize}
+
+\section{Professional Experience}
+\resumeSubheading
+  {Test Corp}{Jan 2024 -- Present}
+  {Software Engineer}{}
+  \resumeItem{Built a thing that did stuff, cutting latency by 50\%.}
+  \resumeItem{Shipped another thing using Kafka and \$100K+ budget.}
+
+\section{AI/ML Projects}
+\resumeProjectHeading
+  {\textbf{Cool Project} $|$ \emph{Python, PyTorch}}{}
+  \resumeItem{Trained a model that did something 90\% of the time.}
+
+\end{document}
