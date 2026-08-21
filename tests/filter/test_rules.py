@@ -1,10 +1,21 @@
+from datetime import datetime, timedelta, timezone
+
 from src.filter.rules import (
+    ATS_STALENESS_CUTOFF_DAYS,
+    LINKEDIN_STALENESS_CUTOFF_DAYS,
     evaluate_posting,
     matches_nyc_location,
     matches_seniority_exclusion,
+    matches_staleness_exclusion,
     matches_title_keywords,
     passes_employment_type,
 )
+
+_NOW = datetime(2026, 8, 21, tzinfo=timezone.utc)
+
+
+def _iso_days_ago(days: int) -> str:
+    return (_NOW - timedelta(days=days)).isoformat()
 
 # --- matches_nyc_location ---
 # Cases mirror the real formats found live: LinkedIn's "New York, NY",
@@ -213,54 +224,132 @@ def test_seniority_exclusion_does_not_match_entry_level_title():
     assert matches_seniority_exclusion("Software Engineer II") is False
 
 
+# --- matches_staleness_exclusion ---
+# Cutoffs are per explicit direction: LinkedIn 24h, ATS sources 14 days.
+# Source format varies: Greenhouse/Ashby give real ISO timestamps (via
+# first_published/publishedAt), LinkedIn gives a real ISO date (postedAt),
+# Workday gives a relative string with day precision only up to 30 days
+# ("Posted N Days Ago"), after which it's bucketed as "Posted 30+ Days
+# Ago" -- a lower bound, not a real age, checked live against real data.
+
+
+def test_linkedin_within_24h_passes():
+    assert matches_staleness_exclusion("linkedin", _iso_days_ago(0), now=_NOW) is False
+
+
+def test_linkedin_older_than_24h_excluded():
+    assert matches_staleness_exclusion("linkedin", _iso_days_ago(2), now=_NOW) is True
+
+
+def test_linkedin_exactly_at_cutoff_passes():
+    assert matches_staleness_exclusion("linkedin", _iso_days_ago(LINKEDIN_STALENESS_CUTOFF_DAYS), now=_NOW) is False
+
+
+def test_ats_source_within_14_days_passes():
+    assert matches_staleness_exclusion("ats:ExampleCo", _iso_days_ago(10), now=_NOW) is False
+
+
+def test_ats_source_older_than_14_days_excluded():
+    assert matches_staleness_exclusion("ats:ExampleCo", _iso_days_ago(45), now=_NOW) is True
+
+
+def test_ats_source_exactly_at_cutoff_passes():
+    assert matches_staleness_exclusion("ats:ExampleCo", _iso_days_ago(ATS_STALENESS_CUTOFF_DAYS), now=_NOW) is False
+
+
+def test_workday_posted_today_passes():
+    assert matches_staleness_exclusion("ats:ExampleCo", "Posted Today", now=_NOW) is False
+
+
+def test_workday_posted_yesterday_passes():
+    assert matches_staleness_exclusion("ats:ExampleCo", "Posted Yesterday", now=_NOW) is False
+
+
+def test_workday_posted_n_days_ago_within_cutoff_passes():
+    assert matches_staleness_exclusion("ats:ExampleCo", "Posted 10 Days Ago", now=_NOW) is False
+
+
+def test_workday_posted_n_days_ago_past_cutoff_excluded():
+    assert matches_staleness_exclusion("ats:ExampleCo", "Posted 20 Days Ago", now=_NOW) is True
+
+
+def test_workday_30_plus_bucket_excluded_even_though_it_is_past_the_ats_cutoff_anyway():
+    assert matches_staleness_exclusion("ats:ExampleCo", "Posted 30+ Days Ago", now=_NOW) is True
+
+
+def test_missing_posted_at_excluded_not_given_benefit_of_the_doubt():
+    assert matches_staleness_exclusion("ats:ExampleCo", None, now=_NOW) is True
+    assert matches_staleness_exclusion("linkedin", None, now=_NOW) is True
+
+
+def test_unparseable_posted_at_excluded():
+    assert matches_staleness_exclusion("ats:ExampleCo", "not a real date", now=_NOW) is True
+
+
 # --- evaluate_posting (combined, rule ordering) ---
 
 
-def _job(title="Software Engineer", location="New York, NY", raw=None):
-    return dict(title=title, location=location, raw_json=raw or {})
+def _job(title="Software Engineer", location="New York, NY", raw=None, source="ats:ExampleCo", posted_at=None):
+    # Default posted_at is "right now" so every test not specifically about
+    # staleness passes that rule regardless of when the suite actually runs.
+    posted_at = posted_at if posted_at is not None else datetime.now(timezone.utc).isoformat()
+    return dict(title=title, location=location, raw_json=raw or {}, source=source, posted_at=posted_at)
+
+
+def _evaluate(j):
+    return evaluate_posting(j["title"], j["location"], j["raw_json"], j["source"], j["posted_at"])
 
 
 def test_evaluate_posting_passes_a_clean_match():
     j = _job()
-    result = evaluate_posting(j["title"], j["location"], j["raw_json"])
+    result = _evaluate(j)
     assert result == {"passed": True, "excluded_by": None}
 
 
-def test_evaluate_posting_excludes_by_location_first():
+def test_evaluate_posting_excludes_by_staleness_first():
+    # Stale AND wrong location -- must report "staleness" (checked first),
+    # not "location".
+    j = _job(location="Chicago, IL", posted_at="Posted 30+ Days Ago")
+    result = _evaluate(j)
+    assert result["excluded_by"] == "staleness"
+
+
+def test_evaluate_posting_excludes_by_location():
     j = _job(location="Chicago, IL")
-    result = evaluate_posting(j["title"], j["location"], j["raw_json"])
+    result = _evaluate(j)
     assert result["excluded_by"] == "location"
 
 
 def test_evaluate_posting_excludes_by_employment_type():
     j = _job(raw={"employmentType": "Intern"})
-    result = evaluate_posting(j["title"], j["location"], j["raw_json"])
+    result = _evaluate(j)
     assert result["excluded_by"] == "employment_type"
 
 
 def test_evaluate_posting_excludes_by_title_keyword():
     j = _job(title="Product Manager")
-    result = evaluate_posting(j["title"], j["location"], j["raw_json"])
+    result = _evaluate(j)
     assert result["excluded_by"] == "title_keyword"
 
 
 def test_evaluate_posting_excludes_by_title_seniority():
     j = _job(title="Senior Software Engineer")
-    result = evaluate_posting(j["title"], j["location"], j["raw_json"])
+    result = _evaluate(j)
     assert result["excluded_by"] == "title_seniority"
 
 
 def test_evaluate_posting_excludes_lead_titles():
     j = _job(title="Lead Software Engineer, Full Stack")
-    result = evaluate_posting(j["title"], j["location"], j["raw_json"])
+    result = _evaluate(j)
     assert result["excluded_by"] == "title_seniority"
 
 
 def test_evaluate_posting_reports_first_failing_rule_when_several_fail():
     # Fails location, employment type, AND title keyword all at once --
-    # must report "location" (checked first), not any of the others.
+    # must report "location" (checked first among these, after staleness),
+    # not any of the others.
     j = _job(title="Marketing Intern", location="Chicago, IL", raw={"employmentType": "Intern"})
-    result = evaluate_posting(j["title"], j["location"], j["raw_json"])
+    result = _evaluate(j)
     assert result["excluded_by"] == "location"
 
 
@@ -269,5 +358,5 @@ def test_evaluate_posting_title_keyword_checked_before_seniority():
     # SWE/AI keyword match at all -- must be bucketed as title_keyword, not
     # mislabeled as a seniority exclusion.
     j = _job(title="Product Manager")
-    result = evaluate_posting(j["title"], j["location"], j["raw_json"])
+    result = _evaluate(j)
     assert result["excluded_by"] == "title_keyword"

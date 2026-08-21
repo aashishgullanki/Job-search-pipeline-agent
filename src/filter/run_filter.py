@@ -21,6 +21,7 @@ from src.filter.rules import evaluate_posting
 from src.filter.store import get_unfiltered_postings, record_filter_result
 
 RULE_LABELS = {
+    "staleness": "too old (LinkedIn >24h, ATS sources >14 days, or age unconfirmable)",
     "location": "not NYC-located",
     "employment_type": "not full-time",
     "title_keyword": "title doesn't match SWE/AI Engineer keywords",
@@ -38,7 +39,7 @@ def run(db_path: Path = DEFAULT_DB_PATH) -> int:
     counts: Counter[str] = Counter()
     for row in to_evaluate:
         raw = json.loads(row["raw_json"]) if row["raw_json"] else {}
-        result = evaluate_posting(row["title"], row["location"], raw)
+        result = evaluate_posting(row["title"], row["location"], raw, row["source"], row["posted_at"])
         record_filter_result(conn, row["id"], result["passed"], result["excluded_by"])
         counts["passed" if result["passed"] else result["excluded_by"]] += 1
 

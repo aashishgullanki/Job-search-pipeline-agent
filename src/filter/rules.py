@@ -2,15 +2,16 @@
 section 3). Runs against everything in `postings` (Track A + B; Track C
 doesn't produce postings rows, only company_monitor_alerts).
 
-Four rules, checked in this order -- the first one a posting fails is what
+Five rules, checked in this order -- the first one a posting fails is what
 gets recorded as `excluded_by`, so a posting failing multiple rules is
 still reported under one clear category rather than double-counted:
 
-  1. location     -- must have a genuine NYC location entry
-  2. employment_type -- must be full-time (or reads as full-time when no
+  1. staleness     -- must be recently posted (cutoff varies by source)
+  2. location     -- must have a genuine NYC location entry
+  3. employment_type -- must be full-time (or reads as full-time when no
                         structured field exists)
-  3. title_keyword -- title must match the SWE/AI-Engineer keyword set
-  4. title_seniority -- title must NOT indicate Senior/Staff/Principal/Manager
+  4. title_keyword -- title must match the SWE/AI-Engineer keyword set
+  5. title_seniority -- title must NOT indicate Senior/Staff/Principal/Manager
 
 Every rule here was checked against live data pulled by the discovery
 runners before being finalized -- see the comments below for what that
@@ -18,6 +19,82 @@ data showed and why each rule looks the way it does.
 """
 
 import re
+from datetime import datetime, timezone
+
+# --- staleness -------------------------------------------------------------
+#
+# No rule here checked posting age at all until a live investigation found
+# real evergreen listings sitting unfiltered in the discovery pool -- some
+# over 1,000 days old (OpenAI, Palantir), and every one of the first 10
+# postings actually tailored turned out to be stale once traced back to
+# its true first-posted date, one over 7 years old. Two cutoffs, by
+# explicit direction: LinkedIn (a broad market scrape where "worth
+# applying to" tracks closely with "just posted") gets a tight 24-hour
+# window; ATS-sourced postings (Greenhouse/Ashby/Workday -- a small
+# curated company list that won't necessarily post daily) get 14 days.
+#
+# Source format varies:
+#   - Greenhouse: `first_published`, a real ISO timestamp (normalize.py
+#     used to capture `updated_at` instead, which can lag the true post
+#     date by years on a listing a company periodically re-saves without
+#     actually reposting -- fixed there, see its docstring)
+#   - Ashby:      `publishedAt`, a real ISO timestamp
+#   - LinkedIn:   `postedAt`, a real ISO date
+#   - Workday:    `postedOn`, a relative string ("Posted Today" / "Posted
+#     N Days Ago") with day-by-day precision only up to 30 days, after
+#     which it buckets everything as "Posted 30+ Days Ago" -- a lower
+#     bound, not an actual age. Some Workday boards (e.g. Blackstone)
+#     don't return this field at all.
+#
+# A posting whose age can't be pinned down -- missing posted_at, or
+# Workday's imprecise 30+ bucket -- is excluded rather than given the
+# benefit of the doubt, by explicit direction: unlike employment_type
+# (where missing data is the norm and defaulting to "excluded" would gut
+# the funnel for a data-availability reason having nothing to do with
+# employment type), staleness is specifically about confidence in
+# freshness, so "can't confirm it's recent" is treated the same as stale.
+
+LINKEDIN_STALENESS_CUTOFF_DAYS = 1
+ATS_STALENESS_CUTOFF_DAYS = 14
+
+_WORKDAY_RELATIVE_PATTERN = re.compile(r"^posted\s+(today|yesterday|(\d+)(\+)?\s+days?\s+ago)$", re.IGNORECASE)
+
+
+def _posting_age_days(posted_at: str | None, now: datetime | None = None) -> int | None:
+    """How many days old a posting is, or None if that can't be determined
+    (missing, unparseable, or Workday's "N+ Days Ago" bucket -- a lower
+    bound, not a real age).
+    """
+    if not posted_at:
+        return None
+    now = now or datetime.now(timezone.utc)
+
+    m = _WORKDAY_RELATIVE_PATTERN.match(posted_at.strip())
+    if m:
+        word = m.group(1).lower()
+        if word == "today":
+            return 0
+        if word == "yesterday":
+            return 1
+        if m.group(3):  # "+" suffix -- e.g. "30+ Days Ago" is a lower bound only, not a real age
+            return None
+        return int(m.group(2))
+
+    try:
+        parsed = datetime.fromisoformat(posted_at.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return (now - parsed).days
+
+
+def matches_staleness_exclusion(source: str, posted_at: str | None, now: datetime | None = None) -> bool:
+    age_days = _posting_age_days(posted_at, now=now)
+    if age_days is None:
+        return True
+    cutoff = LINKEDIN_STALENESS_CUTOFF_DAYS if source == "linkedin" else ATS_STALENESS_CUTOFF_DAYS
+    return age_days > cutoff
 
 # --- location -----------------------------------------------------------
 #
@@ -167,12 +244,22 @@ def matches_seniority_exclusion(title: str) -> bool:
 # --- combined ----------------------------------------------------------
 
 
-def evaluate_posting(title: str, location: str | None, raw_json: dict) -> dict:
-    """Run all four rules in order; return {"passed": bool, "excluded_by": str | None}.
+def evaluate_posting(
+    title: str,
+    location: str | None,
+    raw_json: dict,
+    source: str,
+    posted_at: str | None,
+    now: datetime | None = None,
+) -> dict:
+    """Run all five rules in order; return {"passed": bool, "excluded_by": str | None}.
 
     Stops at the first failing rule -- a posting failing multiple rules is
     reported under whichever one is checked first, not double-counted.
+    `now` is only for tests -- defaults to the real current time.
     """
+    if matches_staleness_exclusion(source, posted_at, now=now):
+        return {"passed": False, "excluded_by": "staleness"}
     if not matches_nyc_location(location):
         return {"passed": False, "excluded_by": "location"}
     if not passes_employment_type(raw_json, title):

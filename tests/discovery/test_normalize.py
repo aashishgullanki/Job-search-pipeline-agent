@@ -22,9 +22,23 @@ def test_normalize_greenhouse_job():
     assert result["title"] == "Software Engineer, Backend"
     assert result["url"] == "https://job-boards.greenhouse.io/examplecowork/jobs/1000001"
     assert result["location"] == "New York, NY"
-    assert result["posted_at"] == "2026-08-01T12:00:00-04:00"
+    assert result["posted_at"] == "2026-07-15T09:00:00-04:00"  # first_published, not updated_at
     assert len(result["url_hash"]) == 64  # sha256 hex digest
     assert json.loads(result["raw_json"]) == job
+
+
+def test_normalize_greenhouse_job_falls_back_to_updated_at_if_first_published_missing():
+    job = {
+        "absolute_url": "https://job-boards.greenhouse.io/examplecowork/jobs/1000003",
+        "id": 1000003,
+        "title": "Software Engineer, Frontend",
+        "updated_at": "2026-08-02T09:30:00-04:00",
+        "location": {"name": "New York, NY"},
+    }
+
+    result = normalize_greenhouse_job("ExampleCo", job)
+
+    assert result["posted_at"] == "2026-08-02T09:30:00-04:00"
 
 
 def test_normalize_greenhouse_job_missing_location():

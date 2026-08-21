@@ -15,6 +15,13 @@ def _url_hash(url: str) -> str:
 
 
 def normalize_greenhouse_job(company: str, job: dict) -> dict:
+    """`first_published` is the actual original-posting date; `updated_at`
+    only reflects the last metadata edit and can lag it by years on a
+    listing a company periodically bumps or re-saves without actually
+    reposting -- checked live against 20 real postings and found gaps up
+    to 1,627 days between the two on the same job. Falls back to
+    `updated_at` only if `first_published` is ever absent.
+    """
     url = job.get("absolute_url", "")
     return {
         "source": f"ats:{company}",
@@ -23,7 +30,7 @@ def normalize_greenhouse_job(company: str, job: dict) -> dict:
         "url": url,
         "url_hash": _url_hash(url),
         "location": (job.get("location") or {}).get("name"),
-        "posted_at": job.get("updated_at"),
+        "posted_at": job.get("first_published") or job.get("updated_at"),
         "raw_json": json.dumps(job),
     }
 
