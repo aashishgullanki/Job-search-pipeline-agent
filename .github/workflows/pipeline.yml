@@ -1,0 +1,130 @@
+name: Job Search Pipeline
+
+# Daily cron (architecture doc section 10) + manual trigger for testing.
+# GitHub-hosted runners are ephemeral -- state persistence between runs is
+# handled via artifacts (see the restore/save steps below), not by
+# committing data/job_pipeline.db to the repo. That file stays gitignored
+# here exactly as it is for local development; the artifact is a separate,
+# CI-only mechanism.
+on:
+  schedule:
+    # 13:00 UTC ~= 9am ET (drifts an hour across DST -- fine for a daily digest)
+    - cron: "0 13 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Local dev needed BasicTeX + a handful of tlmgr packages (titlesec,
+      # enumitem, marvosym, preprint, cm-super -- see README's Tailor stage
+      # notes for how each was found). This is the Debian/apt equivalent,
+      # not yet run against a real CI job -- if a live run hits a missing
+      # LaTeX package, add it here the same way each one was found locally.
+      - name: Install pdflatex (for the Tailor stage)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y texlive-latex-base texlive-latex-extra texlive-fonts-recommended texlive-fonts-extra
+
+      - name: Restore pipeline DB from the previous run
+        uses: actions/download-artifact@v4
+        with:
+          name: job-pipeline-db
+          path: data/
+        continue-on-error: true # first-ever run: no prior artifact to restore, start fresh
+
+      - name: "Discovery: Track A (Greenhouse + Ashby)"
+        run: python3 -m src.discovery.run_track_a_simple
+
+      - name: "Discovery: Track A (Workday)"
+        run: python3 -m src.discovery.run_track_a_workday
+
+      - name: "Discovery: Track C (company monitor)"
+        run: python3 -m src.discovery.run_track_c_monitor
+        # Expected, not a real failure: 3 companies (Tesla/Citadel
+        # Securities/Meta) are bot-blocked and the runner reports that via
+        # a non-zero exit by design -- see run_track_c_monitor.py. A
+        # *different* company newly failing would need investigating, but
+        # shouldn't block the rest of the pipeline either way.
+        continue-on-error: true
+
+      - name: "Discovery: Track B (LinkedIn)"
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: python3 -m src.discovery.run_track_b_linkedin
+
+      - name: Filter
+        run: python3 -m src.filter.run_filter
+
+      # Capped by default -- an unattended daily job with no human
+      # approving batch size before it spends money is exactly the case
+      # the "sample before scaling up" cost-control practice exists for.
+      # Raise/remove --limit once you're comfortable with real steady-state
+      # volume; nothing here re-processes an already-scored posting either
+      # way, so lowering it later never loses anything, it just paces spend.
+      - name: Score
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python3 -m src.score.run_score --limit 30
+
+      - name: Tailor
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python3 -m src.tailor.run_tailor
+
+      - name: Outreach Draft
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: python3 -m src.outreach.run_outreach
+
+      - name: Review list
+        run: python3 -m src.tailor.run_review_list
+
+      - name: Dashboard digest
+        run: python3 -m src.dashboard.run_digest
+
+      # Runs even if an earlier stage failed (e.g. Score hit a credit
+      # limit) so whatever progress *did* happen -- new discoveries,
+      # filter results -- isn't lost on the next scheduled run. Every
+      # stage's own dedup logic is what makes this safe to restore from a
+      # partial run: nothing gets silently skipped or double-processed.
+      - name: Save pipeline DB for the next run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-pipeline-db
+          path: data/job_pipeline.db
+          retention-days: 90
+          overwrite: true
+
+      # Separate from the DB artifact on purpose -- this one is for a
+      # human to actually download and read, not for the next run to
+      # restore from, so it gets its own (shorter) retention window. No
+      # email/Slack delivery yet (architecture doc section 7 mentions it as
+      # a future step) -- reading the digest today means downloading this
+      # artifact from the Actions run page.
+      - name: Save digest + tailored resumes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-digest
+          path: |
+            data/dashboard.md
+            data/review_list.md
+            data/tailored/*.pdf
+          retention-days: 30
+          overwrite: true
+          if-no-files-found: warn
