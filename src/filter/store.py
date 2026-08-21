@@ -19,10 +19,14 @@ def get_unfiltered_postings(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def record_filter_result(
-    conn: sqlite3.Connection, posting_id: int, passed: bool, excluded_by: str | None
+    conn: sqlite3.Connection,
+    posting_id: int,
+    passed: bool,
+    excluded_by: str | None,
+    low_confidence_age: bool = False,
 ) -> None:
     conn.execute(
-        "INSERT INTO filter_results (posting_id, passed, excluded_by) VALUES (?, ?, ?)",
-        (posting_id, int(passed), excluded_by),
+        "INSERT INTO filter_results (posting_id, passed, excluded_by, low_confidence_age) VALUES (?, ?, ?, ?)",
+        (posting_id, int(passed), excluded_by, int(low_confidence_age)),
     )
     conn.commit()

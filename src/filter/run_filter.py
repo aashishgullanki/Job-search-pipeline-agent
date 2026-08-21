@@ -21,7 +21,7 @@ from src.filter.rules import evaluate_posting
 from src.filter.store import get_unfiltered_postings, record_filter_result
 
 RULE_LABELS = {
-    "staleness": "too old (LinkedIn >24h, ATS sources >14 days, or age unconfirmable)",
+    "staleness": "confirmed too old (LinkedIn >24h, ATS sources >14 days, or Workday's 30+ Days Ago bucket)",
     "location": "not NYC-located",
     "employment_type": "not full-time",
     "title_keyword": "title doesn't match SWE/AI Engineer keywords",
@@ -37,18 +37,21 @@ def run(db_path: Path = DEFAULT_DB_PATH) -> int:
     already_filtered = conn.execute("SELECT COUNT(*) FROM filter_results").fetchone()[0]
 
     counts: Counter[str] = Counter()
+    low_confidence_passed = 0
     for row in to_evaluate:
         raw = json.loads(row["raw_json"]) if row["raw_json"] else {}
         result = evaluate_posting(row["title"], row["location"], raw, row["source"], row["posted_at"])
-        record_filter_result(conn, row["id"], result["passed"], result["excluded_by"])
+        record_filter_result(conn, row["id"], result["passed"], result["excluded_by"], result["low_confidence_age"])
         counts["passed" if result["passed"] else result["excluded_by"]] += 1
+        if result["passed"] and result["low_confidence_age"]:
+            low_confidence_passed += 1
 
     total_now = already_filtered + len(to_evaluate)
     passed_total = conn.execute("SELECT COUNT(*) FROM filter_results WHERE passed = 1").fetchone()[0]
 
     print(f"{len(to_evaluate)} newly evaluated | {already_filtered} already filtered (skipped)")
     print(f"\nBreakdown of this run's {len(to_evaluate)} newly evaluated postings:")
-    print(f"  passed: {counts.get('passed', 0)}")
+    print(f"  passed: {counts.get('passed', 0)} (of which {low_confidence_passed} have an unverified/missing posted date -- not excluded, but not confirmed fresh either)")
     for rule, label in RULE_LABELS.items():
         print(f"  excluded ({rule} -- {label}): {counts.get(rule, 0)}")
 

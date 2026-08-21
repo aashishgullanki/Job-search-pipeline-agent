@@ -66,3 +66,14 @@ def test_record_filter_result_stores_passed_and_reason(conn):
     row = conn.execute("SELECT * FROM filter_results WHERE posting_id = ?", (id_a,)).fetchone()
     assert row["passed"] == 0
     assert row["excluded_by"] == "title_seniority"
+    assert row["low_confidence_age"] == 0  # default when not specified
+
+
+def test_record_filter_result_stores_low_confidence_age_flag(conn):
+    id_a = _insert_posting(conn, "a")
+
+    record_filter_result(conn, id_a, passed=True, excluded_by=None, low_confidence_age=True)
+
+    row = conn.execute("SELECT * FROM filter_results WHERE posting_id = ?", (id_a,)).fetchone()
+    assert row["passed"] == 1
+    assert row["low_confidence_age"] == 1

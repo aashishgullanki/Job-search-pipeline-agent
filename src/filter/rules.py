@@ -42,17 +42,25 @@ from datetime import datetime, timezone
 #   - LinkedIn:   `postedAt`, a real ISO date
 #   - Workday:    `postedOn`, a relative string ("Posted Today" / "Posted
 #     N Days Ago") with day-by-day precision only up to 30 days, after
-#     which it buckets everything as "Posted 30+ Days Ago" -- a lower
-#     bound, not an actual age. Some Workday boards (e.g. Blackstone)
-#     don't return this field at all.
+#     which it buckets everything as "Posted 30+ Days Ago". Some Workday
+#     boards (e.g. Blackstone) don't return this field at all.
 #
-# A posting whose age can't be pinned down -- missing posted_at, or
-# Workday's imprecise 30+ bucket -- is excluded rather than given the
-# benefit of the doubt, by explicit direction: unlike employment_type
-# (where missing data is the norm and defaulting to "excluded" would gut
-# the funnel for a data-availability reason having nothing to do with
-# employment type), staleness is specifically about confidence in
-# freshness, so "can't confirm it's recent" is treated the same as stale.
+# These are two genuinely different kinds of uncertainty, by explicit
+# direction, and are NOT treated the same:
+#   - "30+ Days Ago" IS confirmed information -- we know the posting is at
+#     least 30 days old, which already exceeds both cutoffs here (1 and 14
+#     days), so it's excluded outright same as any other confirmed-stale
+#     posting.
+#   - A posted_at that's missing entirely (or unparseable) is zero
+#     information -- it isn't "confirmed old" the way the 30+ bucket is,
+#     it's simply unknown, and could be brand new. Excluding it outright
+#     would be no different from the data-availability trap already
+#     avoided for employment_type (where missing data is common and
+#     defaulting to "excluded" would gut the funnel for reasons unrelated
+#     to the actual rule). So this does NOT fail the staleness check --
+#     it still passes (and flows to every later rule normally) but is
+#     flagged `low_confidence_age` so it's visibly different downstream
+#     from a posting whose freshness is actually confirmed.
 
 LINKEDIN_STALENESS_CUTOFF_DAYS = 1
 ATS_STALENESS_CUTOFF_DAYS = 14
@@ -60,41 +68,47 @@ ATS_STALENESS_CUTOFF_DAYS = 14
 _WORKDAY_RELATIVE_PATTERN = re.compile(r"^posted\s+(today|yesterday|(\d+)(\+)?\s+days?\s+ago)$", re.IGNORECASE)
 
 
-def _posting_age_days(posted_at: str | None, now: datetime | None = None) -> int | None:
-    """How many days old a posting is, or None if that can't be determined
-    (missing, unparseable, or Workday's "N+ Days Ago" bucket -- a lower
-    bound, not a real age).
+def _posting_age_days(posted_at: str | None, now: datetime | None = None) -> tuple[int | None, bool]:
+    """Returns (age_days, is_known).
+
+    is_known is False only when posted_at is missing or fully unparseable
+    -- zero information about age. It's True for every other case,
+    including Workday's "N+ Days Ago" bucket: that's an imprecise age but
+    still a confirmed lower bound (N), which is genuine information, not
+    an unknown.
     """
     if not posted_at:
-        return None
+        return None, False
     now = now or datetime.now(timezone.utc)
 
     m = _WORKDAY_RELATIVE_PATTERN.match(posted_at.strip())
     if m:
         word = m.group(1).lower()
         if word == "today":
-            return 0
+            return 0, True
         if word == "yesterday":
-            return 1
-        if m.group(3):  # "+" suffix -- e.g. "30+ Days Ago" is a lower bound only, not a real age
-            return None
-        return int(m.group(2))
+            return 1, True
+        return int(m.group(2)), True  # "N Days Ago" or "N+ Days Ago" -- either way N is a known (lower-bound) age
 
     try:
         parsed = datetime.fromisoformat(posted_at.strip().replace("Z", "+00:00"))
     except ValueError:
-        return None
+        return None, False
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return (now - parsed).days
+    return (now - parsed).days, True
 
 
-def matches_staleness_exclusion(source: str, posted_at: str | None, now: datetime | None = None) -> bool:
-    age_days = _posting_age_days(posted_at, now=now)
-    if age_days is None:
-        return True
+def evaluate_staleness(source: str, posted_at: str | None, now: datetime | None = None) -> dict:
+    """Returns {"excluded": bool, "low_confidence_age": bool}. See the
+    module comment above for why missing/unparseable dates pass (flagged)
+    instead of being excluded like a confirmed-stale posting.
+    """
+    age_days, is_known = _posting_age_days(posted_at, now=now)
+    if not is_known:
+        return {"excluded": False, "low_confidence_age": True}
     cutoff = LINKEDIN_STALENESS_CUTOFF_DAYS if source == "linkedin" else ATS_STALENESS_CUTOFF_DAYS
-    return age_days > cutoff
+    return {"excluded": age_days > cutoff, "low_confidence_age": False}
 
 # --- location -----------------------------------------------------------
 #
@@ -252,20 +266,28 @@ def evaluate_posting(
     posted_at: str | None,
     now: datetime | None = None,
 ) -> dict:
-    """Run all five rules in order; return {"passed": bool, "excluded_by": str | None}.
+    """Run all five rules in order; return {"passed": bool, "excluded_by":
+    str | None, "low_confidence_age": bool}.
 
     Stops at the first failing rule -- a posting failing multiple rules is
     reported under whichever one is checked first, not double-counted.
-    `now` is only for tests -- defaults to the real current time.
+    low_confidence_age is carried through regardless of outcome (it's only
+    ever True when the posting's age is unknown, not when it's confirmed
+    stale -- see evaluate_staleness), but it's mainly meaningful when the
+    posting passes: a real posting with an unverified age, not excluded,
+    just flagged. `now` is only for tests -- defaults to the real current
+    time.
     """
-    if matches_staleness_exclusion(source, posted_at, now=now):
-        return {"passed": False, "excluded_by": "staleness"}
+    staleness = evaluate_staleness(source, posted_at, now=now)
+    if staleness["excluded"]:
+        return {"passed": False, "excluded_by": "staleness", "low_confidence_age": False}
+    low_confidence_age = staleness["low_confidence_age"]
     if not matches_nyc_location(location):
-        return {"passed": False, "excluded_by": "location"}
+        return {"passed": False, "excluded_by": "location", "low_confidence_age": low_confidence_age}
     if not passes_employment_type(raw_json, title):
-        return {"passed": False, "excluded_by": "employment_type"}
+        return {"passed": False, "excluded_by": "employment_type", "low_confidence_age": low_confidence_age}
     if not matches_title_keywords(title):
-        return {"passed": False, "excluded_by": "title_keyword"}
+        return {"passed": False, "excluded_by": "title_keyword", "low_confidence_age": low_confidence_age}
     if matches_seniority_exclusion(title):
-        return {"passed": False, "excluded_by": "title_seniority"}
-    return {"passed": True, "excluded_by": None}
+        return {"passed": False, "excluded_by": "title_seniority", "low_confidence_age": low_confidence_age}
+    return {"passed": True, "excluded_by": None, "low_confidence_age": low_confidence_age}

@@ -65,8 +65,15 @@ CREATE TABLE IF NOT EXISTS company_monitor_alerts (
 CREATE TABLE IF NOT EXISTS filter_results (
     posting_id INTEGER NOT NULL REFERENCES postings(id),
     passed INTEGER NOT NULL,           -- 1 = passed every rule, 0 = excluded
-    excluded_by TEXT,                  -- rule that excluded it (location | employment_type |
-                                        -- title_keyword | title_seniority), NULL if passed
+    excluded_by TEXT,                  -- rule that excluded it (staleness | location |
+                                        -- employment_type | title_keyword | title_seniority),
+                                        -- NULL if passed
+    low_confidence_age INTEGER NOT NULL DEFAULT 0,  -- 1 if posted_at was missing/unparseable --
+                                        -- no evidence either way about age, so NOT excluded
+                                        -- outright (unlike Workday's "30+ Days Ago" bucket, which
+                                        -- IS a confirmed lower bound and does get excluded), but
+                                        -- flagged as unverified-age since a real cutoff couldn't
+                                        -- actually be checked against it
     filtered_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (posting_id)
 );

@@ -4,9 +4,9 @@ from src.filter.rules import (
     ATS_STALENESS_CUTOFF_DAYS,
     LINKEDIN_STALENESS_CUTOFF_DAYS,
     evaluate_posting,
+    evaluate_staleness,
     matches_nyc_location,
     matches_seniority_exclusion,
-    matches_staleness_exclusion,
     matches_title_keywords,
     passes_employment_type,
 )
@@ -224,75 +224,114 @@ def test_seniority_exclusion_does_not_match_entry_level_title():
     assert matches_seniority_exclusion("Software Engineer II") is False
 
 
-# --- matches_staleness_exclusion ---
+# --- evaluate_staleness ---
 # Cutoffs are per explicit direction: LinkedIn 24h, ATS sources 14 days.
 # Source format varies: Greenhouse/Ashby give real ISO timestamps (via
 # first_published/publishedAt), LinkedIn gives a real ISO date (postedAt),
 # Workday gives a relative string with day precision only up to 30 days
 # ("Posted N Days Ago"), after which it's bucketed as "Posted 30+ Days
 # Ago" -- a lower bound, not a real age, checked live against real data.
+#
+# Two genuinely different kinds of uncertainty, per explicit correction:
+# the 30+ bucket IS confirmed information (at least 30 days, past both
+# cutoffs) and gets excluded outright; a missing/unparseable posted_at is
+# zero information and must NOT be excluded the same way -- it passes,
+# flagged low_confidence_age, same principle already used for
+# employment_type (missing data isn't the same as a confirmed violation).
 
 
 def test_linkedin_within_24h_passes():
-    assert matches_staleness_exclusion("linkedin", _iso_days_ago(0), now=_NOW) is False
+    result = evaluate_staleness("linkedin", _iso_days_ago(0), now=_NOW)
+    assert result == {"excluded": False, "low_confidence_age": False}
 
 
 def test_linkedin_older_than_24h_excluded():
-    assert matches_staleness_exclusion("linkedin", _iso_days_ago(2), now=_NOW) is True
+    result = evaluate_staleness("linkedin", _iso_days_ago(2), now=_NOW)
+    assert result == {"excluded": True, "low_confidence_age": False}
 
 
 def test_linkedin_exactly_at_cutoff_passes():
-    assert matches_staleness_exclusion("linkedin", _iso_days_ago(LINKEDIN_STALENESS_CUTOFF_DAYS), now=_NOW) is False
+    result = evaluate_staleness("linkedin", _iso_days_ago(LINKEDIN_STALENESS_CUTOFF_DAYS), now=_NOW)
+    assert result["excluded"] is False
 
 
 def test_ats_source_within_14_days_passes():
-    assert matches_staleness_exclusion("ats:ExampleCo", _iso_days_ago(10), now=_NOW) is False
+    result = evaluate_staleness("ats:ExampleCo", _iso_days_ago(10), now=_NOW)
+    assert result == {"excluded": False, "low_confidence_age": False}
 
 
 def test_ats_source_older_than_14_days_excluded():
-    assert matches_staleness_exclusion("ats:ExampleCo", _iso_days_ago(45), now=_NOW) is True
+    result = evaluate_staleness("ats:ExampleCo", _iso_days_ago(45), now=_NOW)
+    assert result == {"excluded": True, "low_confidence_age": False}
 
 
 def test_ats_source_exactly_at_cutoff_passes():
-    assert matches_staleness_exclusion("ats:ExampleCo", _iso_days_ago(ATS_STALENESS_CUTOFF_DAYS), now=_NOW) is False
+    result = evaluate_staleness("ats:ExampleCo", _iso_days_ago(ATS_STALENESS_CUTOFF_DAYS), now=_NOW)
+    assert result["excluded"] is False
 
 
 def test_workday_posted_today_passes():
-    assert matches_staleness_exclusion("ats:ExampleCo", "Posted Today", now=_NOW) is False
+    assert evaluate_staleness("ats:ExampleCo", "Posted Today", now=_NOW) == {
+        "excluded": False,
+        "low_confidence_age": False,
+    }
 
 
 def test_workday_posted_yesterday_passes():
-    assert matches_staleness_exclusion("ats:ExampleCo", "Posted Yesterday", now=_NOW) is False
+    assert evaluate_staleness("ats:ExampleCo", "Posted Yesterday", now=_NOW) == {
+        "excluded": False,
+        "low_confidence_age": False,
+    }
 
 
 def test_workday_posted_n_days_ago_within_cutoff_passes():
-    assert matches_staleness_exclusion("ats:ExampleCo", "Posted 10 Days Ago", now=_NOW) is False
+    result = evaluate_staleness("ats:ExampleCo", "Posted 10 Days Ago", now=_NOW)
+    assert result == {"excluded": False, "low_confidence_age": False}
 
 
 def test_workday_posted_n_days_ago_past_cutoff_excluded():
-    assert matches_staleness_exclusion("ats:ExampleCo", "Posted 20 Days Ago", now=_NOW) is True
+    result = evaluate_staleness("ats:ExampleCo", "Posted 20 Days Ago", now=_NOW)
+    assert result == {"excluded": True, "low_confidence_age": False}
 
 
-def test_workday_30_plus_bucket_excluded_even_though_it_is_past_the_ats_cutoff_anyway():
-    assert matches_staleness_exclusion("ats:ExampleCo", "Posted 30+ Days Ago", now=_NOW) is True
+def test_workday_30_plus_bucket_is_confirmed_stale_not_low_confidence():
+    # "30+ Days Ago" is a known lower bound (>=30, past both cutoffs) --
+    # confirmed information, excluded outright, NOT flagged low_confidence.
+    result = evaluate_staleness("ats:ExampleCo", "Posted 30+ Days Ago", now=_NOW)
+    assert result == {"excluded": True, "low_confidence_age": False}
 
 
-def test_missing_posted_at_excluded_not_given_benefit_of_the_doubt():
-    assert matches_staleness_exclusion("ats:ExampleCo", None, now=_NOW) is True
-    assert matches_staleness_exclusion("linkedin", None, now=_NOW) is True
+def test_missing_posted_at_passes_but_flagged_low_confidence():
+    # Zero information about age -- must NOT be treated like a confirmed-
+    # stale posting (the 30+ bucket). Passes staleness, flagged instead.
+    assert evaluate_staleness("ats:ExampleCo", None, now=_NOW) == {
+        "excluded": False,
+        "low_confidence_age": True,
+    }
+    assert evaluate_staleness("linkedin", None, now=_NOW) == {
+        "excluded": False,
+        "low_confidence_age": True,
+    }
 
 
-def test_unparseable_posted_at_excluded():
-    assert matches_staleness_exclusion("ats:ExampleCo", "not a real date", now=_NOW) is True
+def test_unparseable_posted_at_passes_but_flagged_low_confidence():
+    result = evaluate_staleness("ats:ExampleCo", "not a real date", now=_NOW)
+    assert result == {"excluded": False, "low_confidence_age": True}
 
 
 # --- evaluate_posting (combined, rule ordering) ---
 
 
-def _job(title="Software Engineer", location="New York, NY", raw=None, source="ats:ExampleCo", posted_at=None):
+_UNSET = object()
+
+
+def _job(title="Software Engineer", location="New York, NY", raw=None, source="ats:ExampleCo", posted_at=_UNSET):
     # Default posted_at is "right now" so every test not specifically about
     # staleness passes that rule regardless of when the suite actually runs.
-    posted_at = posted_at if posted_at is not None else datetime.now(timezone.utc).isoformat()
+    # A sentinel (not None) distinguishes "caller didn't specify" from a
+    # caller deliberately testing a missing posted_at.
+    if posted_at is _UNSET:
+        posted_at = datetime.now(timezone.utc).isoformat()
     return dict(title=title, location=location, raw_json=raw or {}, source=source, posted_at=posted_at)
 
 
@@ -303,15 +342,31 @@ def _evaluate(j):
 def test_evaluate_posting_passes_a_clean_match():
     j = _job()
     result = _evaluate(j)
-    assert result == {"passed": True, "excluded_by": None}
+    assert result == {"passed": True, "excluded_by": None, "low_confidence_age": False}
 
 
 def test_evaluate_posting_excludes_by_staleness_first():
-    # Stale AND wrong location -- must report "staleness" (checked first),
-    # not "location".
+    # Confirmed-stale (30+ bucket) AND wrong location -- must report
+    # "staleness" (checked first), not "location".
     j = _job(location="Chicago, IL", posted_at="Posted 30+ Days Ago")
     result = _evaluate(j)
     assert result["excluded_by"] == "staleness"
+
+
+def test_evaluate_posting_passes_with_unverified_age_flagged_not_excluded():
+    # Missing posted_at is NOT the same as confirmed-stale -- the posting
+    # still passes every other rule, just flagged.
+    j = _job(posted_at=None)
+    result = _evaluate(j)
+    assert result == {"passed": True, "excluded_by": None, "low_confidence_age": True}
+
+
+def test_evaluate_posting_low_confidence_age_carried_through_a_later_exclusion():
+    # Unverified age doesn't get excluded outright, but the flag still
+    # rides along even when a later rule (location, here) fails it.
+    j = _job(location="Chicago, IL", posted_at=None)
+    result = _evaluate(j)
+    assert result == {"passed": False, "excluded_by": "location", "low_confidence_age": True}
 
 
 def test_evaluate_posting_excludes_by_location():
