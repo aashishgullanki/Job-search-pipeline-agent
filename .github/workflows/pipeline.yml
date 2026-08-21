@@ -12,6 +12,10 @@ on:
     - cron: "0 13 * * *"
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+  actions: read # needed by dawidd6/action-download-artifact to look up prior runs' artifacts
+
 jobs:
   pipeline:
     runs-on: ubuntu-latest
@@ -38,12 +42,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y texlive-latex-base texlive-latex-extra texlive-fonts-recommended texlive-fonts-extra
 
+      # Plain actions/download-artifact@v4 (no run-id given) only reaches
+      # into the CURRENT run or a re-run of it -- it does NOT look at a
+      # separate prior day's scheduled run, confirmed against the action's
+      # own docs before wiring this in (not assumed). Used as originally
+      # written, this step would silently find nothing every single day
+      # and the DB would never actually persist, defeating the entire
+      # point and reproducing the "unexpectedly empty" symptom on every
+      # run. dawidd6/action-download-artifact resolves the latest artifact
+      # with this name across ALL previous runs of this workflow instead.
       - name: Restore pipeline DB from the previous run
-        uses: actions/download-artifact@v4
+        uses: dawidd6/action-download-artifact@v6
         with:
+          github_token: ${{ github.token }}
+          workflow: pipeline.yml
+          # Any conclusion, not just success -- the save step below runs
+          # on if: always(), specifically so a partially-failed run (e.g.
+          # Score hit a credit limit) still persists whatever progress it
+          # made; restoring must be able to find that DB too, not only one
+          # from a run that fully succeeded end to end.
+          workflow_conclusion: ""
           name: job-pipeline-db
           path: data/
-        continue-on-error: true # first-ever run: no prior artifact to restore, start fresh
+          if_no_artifact_found: warn # first-ever run: nothing to restore yet, start fresh
 
       - name: "Discovery: Track A (Greenhouse + Ashby)"
         run: python3 -m src.discovery.run_track_a_simple

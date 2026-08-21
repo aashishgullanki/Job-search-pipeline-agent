@@ -1,0 +1,77 @@
+name: pdflatex Dry Run
+
+# Isolated smoke test for the one piece of pipeline.yml that's genuinely
+# unverified: whether the apt package list actually gives a working LaTeX
+# toolchain on a real Ubuntu runner. Manual trigger only, no repo secrets
+# needed -- this never touches Score/Tailor/Outreach or anything that
+# costs API usage, it just compiles the existing Baseline resume using the
+# real project code (compile_tex_to_pdf(), the exact function and flags
+# the Tailor stage itself calls) so a missing LaTeX package shows up here,
+# in isolation, before ever running the full pipeline for real.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  pdflatex-dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Same package list as pipeline.yml's "Install pdflatex" step -- keep
+      # these two in sync; this workflow exists specifically to validate
+      # that list before it's trusted in the real pipeline run.
+      - name: Install pdflatex
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y texlive-latex-base texlive-latex-extra texlive-fonts-recommended texlive-fonts-extra
+
+      - name: Confirm pdflatex resolves on PATH
+        run: pdflatex --version
+
+      # Real compile, not just "the binary exists" -- local setup found
+      # every missing package (titlesec, enumitem, marvosym, preprint,
+      # cm-super) only by actually compiling, never by a --version check.
+      # Uses the project's own compile_tex_to_pdf()/extract_latex_error()
+      # so this is the exact code path and flags the Tailor stage uses,
+      # not an approximation of it.
+      - name: Compile the Baseline resume with the real project code
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          from src.tailor.resume_tailor import compile_tex_to_pdf, extract_latex_error, get_pdf_page_count
+
+          tex_path = Path("resumes/Baseline Resume.tex")
+          result = compile_tex_to_pdf(tex_path)
+          pdf_path = tex_path.with_suffix(".pdf")
+
+          if result.returncode != 0 or not pdf_path.exists():
+              print(result.stdout)
+              print(f"\n[extracted error] {extract_latex_error(result.stdout)}")
+              raise SystemExit(f"pdflatex failed (exit code {result.returncode})")
+
+          pages = get_pdf_page_count(pdf_path)
+          print(f"Compiled OK: {pdf_path} ({pages} page(s))")
+          if pages != 1:
+              raise SystemExit(f"Compiled, but wrong page count: got {pages}, expected 1")
+          PY
+
+      - name: Upload compiled PDF + log for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdflatex-dry-run-output
+          path: |
+            resumes/Baseline Resume.pdf
+            resumes/Baseline Resume.log
+          if-no-files-found: warn
