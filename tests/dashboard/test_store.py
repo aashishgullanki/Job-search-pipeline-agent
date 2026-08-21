@@ -128,14 +128,17 @@ def test_copies_pdf_and_tex_not_already_in_dest(conn, tmp_path):
     assert (dest_dir / "Acme_SWE_1.tex").read_text() == "tex-source"
 
 
-def test_skips_files_already_present_in_dest(conn, tmp_path):
+def test_overwrites_stale_file_already_present_in_dest(conn, tmp_path):
+    # A coincidentally-repeated posting_id (e.g. after a DB reset + fresh
+    # repopulation) can produce the same filename for a *different*
+    # tailoring run -- the fresh source must win, not the stale copy.
     src_dir = tmp_path / "data" / "tailored"
     src_dir.mkdir(parents=True)
     pdf = src_dir / "Acme_SWE_1.pdf"
-    pdf.write_text("new-content")
+    pdf.write_text("fresh-content")
     dest_dir = tmp_path / "reviewed_output"
     dest_dir.mkdir(parents=True)
-    (dest_dir / "Acme_SWE_1.pdf").write_text("original-content")
+    (dest_dir / "Acme_SWE_1.pdf").write_text("stale-content-from-a-prior-db")
 
     pid = _insert_posting(conn, "a")
     _score(conn, pid, 9)
@@ -143,8 +146,25 @@ def test_skips_files_already_present_in_dest(conn, tmp_path):
 
     copied = ensure_reviewed_output_copies(conn, dest_dir=dest_dir)
 
-    assert copied == 0
-    assert (dest_dir / "Acme_SWE_1.pdf").read_text() == "original-content"
+    assert copied == 1
+    assert (dest_dir / "Acme_SWE_1.pdf").read_text() == "fresh-content"
+
+
+def test_recopying_identical_content_is_a_safe_no_op(conn, tmp_path):
+    src_dir = tmp_path / "data" / "tailored"
+    src_dir.mkdir(parents=True)
+    pdf = src_dir / "Acme_SWE_1.pdf"
+    pdf.write_text("same-content")
+    dest_dir = tmp_path / "reviewed_output"
+
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid, pdf_path=str(pdf), tex_path=None)
+
+    ensure_reviewed_output_copies(conn, dest_dir=dest_dir)
+    ensure_reviewed_output_copies(conn, dest_dir=dest_dir)  # second call, same DB/source
+
+    assert (dest_dir / "Acme_SWE_1.pdf").read_text() == "same-content"
 
 
 def test_handles_missing_source_gracefully(conn, tmp_path):

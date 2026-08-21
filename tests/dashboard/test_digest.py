@@ -66,13 +66,16 @@ def test_empty_state_messages_when_no_data(conn, tmp_path):
 
 
 def test_section_1_includes_pdf_link_reasoning_and_summary(conn, tmp_path):
-    pdf = tmp_path / "Acme_SWE_1.pdf"
+    src_dir = tmp_path / "data" / "tailored"
+    src_dir.mkdir(parents=True)
+    pdf = src_dir / "Acme_SWE_1.pdf"
     pdf.write_text("pdf-bytes")
+    reviewed_output_dir = tmp_path / "reviewed_output"
     pid = _insert_posting(conn, "a", company="Acme", title="SWE")
     _score(conn, pid, 9, reasoning="Great match on backend experience")
     _tailor_success(conn, pid, pdf_path=str(pdf), summary="Led with distributed systems bullet\nAdded Kafka to skills")
 
-    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=reviewed_output_dir)
 
     assert "Acme" in md
     assert "SWE" in md

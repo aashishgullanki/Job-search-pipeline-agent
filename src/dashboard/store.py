@@ -43,9 +43,18 @@ def ensure_application_rows(conn: sqlite3.Connection) -> int:
 
 
 def ensure_reviewed_output_copies(conn: sqlite3.Connection, dest_dir: Path = REVIEWED_OUTPUT_DIR) -> int:
-    """Copy any tailored PDF/tex that's only in its original data/tailored/
-    location into reviewed_output/, the durable directory the digest
-    actually links to. Idempotent -- skips anything already copied.
+    """Copy every tailored PDF/tex from its data/tailored/ source into
+    reviewed_output/, the durable directory the digest actually links to.
+    Always overwrites rather than skipping when the destination filename
+    already exists -- filenames are `{company}_{title}_{posting_id}.pdf`,
+    and posting_id is just a per-DB autoincrement, not a stable content
+    key. After a DB reset + fresh repopulation, a coincidentally-repeated
+    posting_id can produce the exact same filename for a *different*
+    tailoring run; skip-if-exists would silently keep the old file under
+    a fresh posting's link instead of syncing it to what the `tailored`
+    table (and the Tailoring Summary text next to it) actually says now.
+    Within one DB's lifetime this is a safe no-op re-copy, since a given
+    posting_id is only ever tailored once (dedup in tailor/store.py).
     Best-effort: if the source was already swept from data/tailored/
     before this ran, it's simply not copyable; the digest handles a
     missing file gracefully rather than linking to nothing.
@@ -60,12 +69,13 @@ def ensure_reviewed_output_copies(conn: sqlite3.Connection, dest_dir: Path = REV
             if not src:
                 continue
             src_path = Path(src)
-            dest_path = dest_dir / src_path.name
-            if dest_path.exists():
+            if not src_path.exists():
                 continue
-            if src_path.exists():
-                shutil.copy(src_path, dest_path)
-                copied += 1
+            dest_path = dest_dir / src_path.name
+            if src_path.resolve() == dest_path.resolve():
+                continue  # source IS the destination (e.g. tests pointing both at the same dir)
+            shutil.copy(src_path, dest_path)
+            copied += 1
     return copied
 
 

@@ -69,3 +69,42 @@ def test_never_rescores_a_posting_on_rerun(conn):
     unscored = get_unscored_passing_postings(conn)
 
     assert len(unscored) == 0
+
+
+def test_limit_caps_the_number_returned(conn):
+    for h in ["a", "b", "c", "d"]:
+        _insert_posting(conn, h, passed=True)
+
+    unscored = get_unscored_passing_postings(conn, limit=2)
+
+    assert len(unscored) == 2
+
+
+def test_limit_none_returns_everything(conn):
+    for h in ["a", "b", "c"]:
+        _insert_posting(conn, h, passed=True)
+
+    unscored = get_unscored_passing_postings(conn, limit=None)
+
+    assert len(unscored) == 3
+
+
+def test_limit_larger_than_available_returns_all(conn):
+    _insert_posting(conn, "a", passed=True)
+
+    unscored = get_unscored_passing_postings(conn, limit=50)
+
+    assert len(unscored) == 1
+
+
+def test_limit_leaves_the_rest_unscored_for_a_future_run(conn):
+    for h in ["a", "b", "c"]:
+        _insert_posting(conn, h, passed=True)
+
+    first_batch = get_unscored_passing_postings(conn, limit=1)
+    for row in first_batch:
+        record_score(conn, row["id"], score=6, reasoning="Sampled first.")
+
+    remaining = get_unscored_passing_postings(conn)
+
+    assert len(remaining) == 2

@@ -6,7 +6,12 @@ Haiku 4.5 as an LLM judge. Requires ANTHROPIC_API_KEY. Re-running is a
 no-op for postings that already have a scores row -- see src/score/store.py.
 
 Usage:
-    python3 -m src.score.run_score [--db PATH] [--delay SECONDS]
+    python3 -m src.score.run_score [--db PATH] [--delay SECONDS] [--limit N]
+
+--limit caps how many unscored postings get sent to the LLM this run, for
+capped dev/test cycles (each call is a paid Anthropic request) -- the rest
+stay unscored and get picked up on a future unlimited run, same dedup as
+always.
 """
 
 import argparse
@@ -28,7 +33,7 @@ from src.score.store import get_unscored_passing_postings, record_score
 DEFAULT_DELAY_SECONDS = 0.3
 
 
-def run(db_path: Path = DEFAULT_DB_PATH, delay: float = DEFAULT_DELAY_SECONDS) -> int:
+def run(db_path: Path = DEFAULT_DB_PATH, delay: float = DEFAULT_DELAY_SECONDS, limit: int | None = None) -> int:
     load_dotenv()
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -44,8 +49,10 @@ def run(db_path: Path = DEFAULT_DB_PATH, delay: float = DEFAULT_DELAY_SECONDS) -
     conn = get_connection(db_path)
     init_db(conn)
 
-    to_score = get_unscored_passing_postings(conn)
+    to_score = get_unscored_passing_postings(conn, limit=limit)
     already_scored = conn.execute("SELECT COUNT(*) FROM scores").fetchone()[0]
+    if limit is not None:
+        print(f"[limit={limit}] scoring at most {len(to_score)} posting(s) this run")
 
     score_counts: Counter[int] = Counter()
     errors: list[tuple[str, str]] = []
@@ -85,5 +92,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH, help="SQLite DB path")
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY_SECONDS, help="Delay between API calls")
+    parser.add_argument("--limit", type=int, default=None, help="Cap how many unscored postings to score this run")
     args = parser.parse_args()
-    sys.exit(run(db_path=args.db, delay=args.delay))
+    sys.exit(run(db_path=args.db, delay=args.delay, limit=args.limit))
