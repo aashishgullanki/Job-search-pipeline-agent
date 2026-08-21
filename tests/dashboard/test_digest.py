@@ -65,7 +65,7 @@ def test_empty_state_messages_when_no_data(conn, tmp_path):
     assert "Nothing flagged right now." in md
 
 
-def test_section_1_includes_pdf_link_reasoning_and_summary(conn, tmp_path):
+def test_section_1_includes_pdf_link_and_reasoning(conn, tmp_path):
     src_dir = tmp_path / "data" / "tailored"
     src_dir.mkdir(parents=True)
     pdf = src_dir / "Acme_SWE_1.pdf"
@@ -73,7 +73,7 @@ def test_section_1_includes_pdf_link_reasoning_and_summary(conn, tmp_path):
     reviewed_output_dir = tmp_path / "reviewed_output"
     pid = _insert_posting(conn, "a", company="Acme", title="SWE")
     _score(conn, pid, 9, reasoning="Great match on backend experience")
-    _tailor_success(conn, pid, pdf_path=str(pdf), summary="Led with distributed systems bullet\nAdded Kafka to skills")
+    _tailor_success(conn, pid, pdf_path=str(pdf))
 
     md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=reviewed_output_dir)
 
@@ -81,8 +81,71 @@ def test_section_1_includes_pdf_link_reasoning_and_summary(conn, tmp_path):
     assert "SWE" in md
     assert "[Acme_SWE_1.pdf](../" in md
     assert "Great match on backend experience" in md
-    assert "Led with distributed systems bullet" in md
-    assert "Added Kafka to skills" in md
+
+
+def test_section_1_does_not_render_tailoring_summary(conn, tmp_path):
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid, summary="Reordered bullet 1\nUpdated Technical Skills")
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    assert "Tailoring summary" not in md
+    assert "Reordered bullet 1" not in md
+    assert "Updated Technical Skills" not in md
+
+
+def test_section_1_groups_multiple_roles_at_same_company_under_one_heading(conn, tmp_path):
+    a = _insert_posting(conn, "a", company="Point72", title="Software Engineer")
+    b = _insert_posting(conn, "b", company="Point72", title="Machine Learning Engineer")
+    c = _insert_posting(conn, "c", company="Point72", title="Quant Developer")
+    _score(conn, a, 9)
+    _score(conn, b, 8)
+    _score(conn, c, 8)
+    _tailor_success(conn, a)
+    _tailor_success(conn, b)
+    _tailor_success(conn, c)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    # Only one H3 heading for Point72 -- the highest-scoring role leads it.
+    assert md.count("### ") == 1
+    assert "Point72 — Software Engineer" in md
+    assert "Other tailored roles at Point72:" in md
+    assert "Machine Learning Engineer" in md
+    assert "Quant Developer" in md
+
+
+def test_section_1_other_roles_include_posting_id_and_resume_link(conn, tmp_path):
+    src_dir = tmp_path / "data" / "tailored"
+    src_dir.mkdir(parents=True)
+    reviewed_output_dir = tmp_path / "reviewed_output"
+    pdf_a = src_dir / "Jane_Street_SWE_1.pdf"
+    pdf_b = src_dir / "Jane_Street_MLE_2.pdf"
+    pdf_a.write_text("a")
+    pdf_b.write_text("b")
+    a = _insert_posting(conn, "a", company="Jane Street", title="SWE")
+    b = _insert_posting(conn, "b", company="Jane Street", title="MLE")
+    _score(conn, a, 9)
+    _score(conn, b, 8)
+    _tailor_success(conn, a, pdf_path=str(pdf_a))
+    _tailor_success(conn, b, pdf_path=str(pdf_b))
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=reviewed_output_dir)
+
+    other_roles_block = md.split("Other tailored roles at Jane Street:")[1].split("###")[0]
+    assert f"posting_id: {b}" in other_roles_block
+    assert "[Jane_Street_MLE_2.pdf](../" in other_roles_block
+
+
+def test_section_1_single_role_company_has_no_other_roles_line(conn, tmp_path):
+    pid = _insert_posting(conn, "a", company="SoloCo")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    assert "Other tailored roles at SoloCo" not in md
 
 
 def test_missing_pdf_file_shows_placeholder_not_broken_link(conn, tmp_path):
@@ -137,6 +200,31 @@ def test_section_2_shows_score_below_threshold_no_pdf_needed(conn, tmp_path):
     assert "LowFitCo" in md
     assert "Backend Eng" in md
     assert "Some overlap but junior-heavy team" in md
+
+
+def test_section_2_groups_multiple_roles_at_same_company(conn, tmp_path):
+    a = _insert_posting(conn, "a", company="HRT", title="Research Engineer")
+    b = _insert_posting(conn, "b", company="HRT", title="AI Research Engineer, Inference")
+    _score(conn, a, 7, reasoning="Solid but early-career for the role")
+    _score(conn, b, 4, reasoning="Missing kernel-level ML systems experience")
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    manual_section = md.split("## For manual review")[1].split("## ⚠")[0]
+    # Only one top-level bullet naming HRT -- the higher-scoring role leads it.
+    assert manual_section.count("HRT — ") == 1
+    assert "HRT — Research Engineer" in manual_section
+    assert "Other scored roles at HRT:" in manual_section
+    assert "AI Research Engineer, Inference" in manual_section
+
+
+def test_section_2_single_role_company_has_no_other_roles_line(conn, tmp_path):
+    pid = _insert_posting(conn, "a", company="SoloReviewCo")
+    _score(conn, pid, 5)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    assert "Other scored roles at SoloReviewCo" not in md
 
 
 def test_section_2_excludes_at_or_above_threshold(conn, tmp_path):

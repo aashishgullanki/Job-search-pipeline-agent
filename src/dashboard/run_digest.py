@@ -26,9 +26,8 @@ def run(db_path: Path = DEFAULT_DB_PATH, output_path: Path = DEFAULT_OUTPUT_PATH
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(markdown)
 
-    ready_count = markdown.count("\n### [")
-    review_count = markdown.count("\n- **[")
-    print(f"Wrote dashboard to {output_path} ({ready_count} ready to review, plus review-list + alerts)")
+    ready_companies = markdown.count("\n### [")
+    print(f"Wrote dashboard to {output_path} ({ready_companies} compan{'y' if ready_companies == 1 else 'ies'} ready to review, plus review-list + alerts)")
 
     conn.close()
     return 0

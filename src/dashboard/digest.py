@@ -2,9 +2,12 @@
 surfacing three things --
 
 1. Score>=threshold, successfully-tailored postings, each with its resume
-   PDF (linked into reviewed_output/), fit reasoning, Tailoring Summary,
-   and current accept/reject status.
-2. Score<threshold postings from the review list, for manual assessment.
+   PDF (linked into reviewed_output/), fit reasoning, and current
+   accept/reject status. One entry per company (its highest-scoring
+   tailored role) -- other tailored roles at the same company are linked
+   in a compact list underneath rather than repeating the full block.
+2. Score<threshold postings from the review list, for manual assessment --
+   same one-entry-per-company treatment.
 3. Track C company-monitor alerts, called out as a clearly separate,
    lower-confidence feed -- these are page-diff signals, not confirmed
    postings.
@@ -15,6 +18,7 @@ live web UI yet.
 """
 
 import sqlite3
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,6 +32,18 @@ from src.dashboard.store import (
 from src.tailor.store import TAILOR_SCORE_THRESHOLD, get_review_list_postings
 
 ACCEPT_COMMAND_TEMPLATE = "python3 -m src.dashboard.set_application_status {posting_id} accepted   # or: rejected"
+
+
+def _group_by_company(rows: list[sqlite3.Row]) -> "OrderedDict[str, list[sqlite3.Row]]":
+    """Both source queries already sort by score desc, so this both groups
+    and preserves a sensible group order (a company's best-scoring role
+    decides where its group falls) and a sensible within-group order (each
+    company's own rows stay score-desc) for free -- no extra query/sort.
+    """
+    groups: "OrderedDict[str, list[sqlite3.Row]]" = OrderedDict()
+    for row in rows:
+        groups.setdefault(row["company"], []).append(row)
+    return groups
 
 
 def _resume_link(pdf_path: str | None, reviewed_output_dir: Path) -> str:
@@ -49,6 +65,12 @@ def _status_marker(status: str | None) -> str:
     }.get(status, "[ ] pending_review")
 
 
+def _status_checkbox(status: str | None) -> str:
+    """Compact form of _status_marker for inline use in "other roles" lists."""
+    status = status or "pending_review"
+    return {"accepted": "[x]", "submitted": "[x]", "rejected": "[rej]"}.get(status, "[ ]")
+
+
 def build_digest_markdown(
     conn: sqlite3.Connection,
     threshold: int = TAILOR_SCORE_THRESHOLD,
@@ -65,54 +87,69 @@ def build_digest_markdown(
     lines = ["# Review Dashboard", "", f"Generated {generated_at}.", ""]
 
     # --- Section 1: ready to review ---
+    tailored_groups = _group_by_company(tailored)
     lines += [
-        f"## Ready to review -- score >= {threshold} ({len(tailored)})",
+        f"## Ready to review -- score >= {threshold} ({len(tailored)} posting(s), {len(tailored_groups)} compan"
+        f"{'y' if len(tailored_groups) == 1 else 'ies'})",
         "",
-        "Tailored resume, fit reasoning, and what was changed for each. Accept or reject with:",
+        "One entry per company, its highest-scoring tailored role -- other tailored roles at the same "
+        "company are listed underneath it. Accept or reject any of them with:",
         "",
         "```",
         "python3 -m src.dashboard.set_application_status <posting_id> <accepted|rejected>",
         "```",
         "",
     ]
-    if not tailored:
+    if not tailored_groups:
         lines.append("Nothing here right now.")
         lines.append("")
-    for row in tailored:
+    for company, postings in tailored_groups.items():
+        lead, others = postings[0], postings[1:]
         lines.append(
-            f"### {_status_marker(row['application_status'])} -- [{row['score']}/10] "
-            f"{row['company']} — {row['title']} (posting_id: {row['posting_id']})"
+            f"### {_status_marker(lead['application_status'])} -- [{lead['score']}/10] "
+            f"{lead['company']} — {lead['title']} (posting_id: {lead['posting_id']})"
         )
         lines.append("")
-        lines.append(f"- **Location:** {row['location'] or 'n/a'}")
-        lines.append(f"- **Posting:** {row['url']}")
-        lines.append(f"- **Resume:** {_resume_link(row['resume_pdf_path'], reviewed_output_dir)}")
-        lines.append(f"- **Fit reasoning:** {row['reasoning']}")
-        lines.append(f"- **Accept/reject:** `{ACCEPT_COMMAND_TEMPLATE.format(posting_id=row['posting_id'])}`")
-        lines.append("- **Tailoring summary:**")
-        for change in (row["tailoring_summary"] or "").split("\n"):
-            change = change.strip()
-            if change:
-                lines.append(f"  - {change}")
+        lines.append(f"- **Location:** {lead['location'] or 'n/a'}")
+        lines.append(f"- **Posting:** {lead['url']}")
+        lines.append(f"- **Resume:** {_resume_link(lead['resume_pdf_path'], reviewed_output_dir)}")
+        lines.append(f"- **Fit reasoning:** {lead['reasoning']}")
+        lines.append(f"- **Accept/reject:** `{ACCEPT_COMMAND_TEMPLATE.format(posting_id=lead['posting_id'])}`")
+        if others:
+            lines.append(f"- **Other tailored roles at {company}:**")
+            for o in others:
+                lines.append(
+                    f"  - {_status_checkbox(o['application_status'])} [{o['score']}/10] {o['title']} "
+                    f"(posting_id: {o['posting_id']}) — [posting]({o['url']}) · "
+                    f"{_resume_link(o['resume_pdf_path'], reviewed_output_dir)}"
+                )
         lines.append("")
 
     # --- Section 2: manual review ---
+    review_groups = _group_by_company(review_list)
     lines += [
-        f"## For manual review -- score < {threshold} ({len(review_list)})",
+        f"## For manual review -- score < {threshold} ({len(review_list)} posting(s), {len(review_groups)} compan"
+        f"{'y' if len(review_groups) == 1 else 'ies'})",
         "",
         "Passed the Filter stage and were scored, but below the auto-tailor threshold -- no resume "
-        "generated. Worth a manual look; nothing here is accepted/rejected automatically.",
+        "generated. One entry per company, its highest-scoring role -- other scored roles at the same "
+        "company are listed underneath it. Nothing here is accepted/rejected automatically.",
         "",
     ]
-    if not review_list:
+    if not review_groups:
         lines.append("Nothing in this range right now.")
         lines.append("")
-    for row in review_list:
+    for company, postings in review_groups.items():
+        lead, others = postings[0], postings[1:]
         lines.append(
-            f"- **[{row['score']}/10] {row['company']} — {row['title']}** "
-            f"({row['location'] or 'n/a'}) -- {row['reasoning']} ([link]({row['url']}))"
+            f"- **[{lead['score']}/10] {lead['company']} — {lead['title']}** "
+            f"({lead['location'] or 'n/a'}) -- {lead['reasoning']} ([link]({lead['url']}))"
         )
-    if review_list:
+        if others:
+            lines.append(f"  - Other scored roles at {company}:")
+            for o in others:
+                lines.append(f"    - [{o['score']}/10] {o['title']} ([link]({o['url']}))")
+    if review_groups:
         lines.append("")
 
     # --- Section 3: Track C alerts, clearly separate ---
