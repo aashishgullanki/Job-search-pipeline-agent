@@ -24,11 +24,24 @@ CREATE TABLE IF NOT EXISTS tailored (
     status TEXT NOT NULL,              -- 'tailored' (success) | 'failed' (exhausted compile retries)
     resume_pdf_path TEXT,              -- NULL if status = 'failed'
     resume_tex_path TEXT,              -- kept alongside the PDF for review even on success
-    outreach_draft TEXT,
+    outreach_draft TEXT,               -- generic draft from the Tailor stage's own skill for every
+                                        -- source; overwritten with a contact-specific message by the
+                                        -- Outreach Draft stage for Track B postings (see below)
     tailoring_summary TEXT,            -- newline-joined list of changes made and why (skill's required output)
     attempts INTEGER NOT NULL,         -- how many compile attempts this took (<= MAX_COMPILE_ATTEMPTS)
     failure_reason TEXT,               -- NULL unless status = 'failed'
     tailored_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- Outreach Draft stage (architecture doc section 6) -- Track B (LinkedIn) postings only, all
+    -- NULL until that stage runs against a given posting, and NULL forever for Track A/C postings.
+    outreach_status TEXT,              -- 'drafted' (contact found + outreach_draft overwritten) |
+                                        -- 'no_contact_found' (outreach_draft left as the generic one)
+    outreach_contact_name TEXT,
+    outreach_contact_profile_url TEXT, -- LinkedIn profile of the contact the message was drafted for
+    outreach_source_post_url TEXT,     -- the LinkedIn post that surfaced this contact
+    outreach_candidate_contacts TEXT,  -- JSON: up to 3 contacts discovery found (only the first is
+                                        -- used for the actual draft) if drafted, or the widening
+                                        -- attempts_log if no_contact_found -- kept for review either way
+    outreach_drafted_at TEXT,
     PRIMARY KEY (posting_id)
 );
 
