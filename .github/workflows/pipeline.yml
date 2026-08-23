@@ -6,10 +6,21 @@ name: Job Search Pipeline
 # committing data/job_pipeline.db to the repo. That file stays gitignored
 # here exactly as it is for local development; the artifact is a separate,
 # CI-only mechanism.
+#
+# The `schedule:` trigger is deliberately commented out for now. A
+# workflow file with an active schedule block arms immediately on
+# GitHub's side the moment it lands on the default branch -- independent
+# of secrets being configured or anyone manually triggering anything. It
+# already fired for real once, unprompted, before this was caught (failed
+# cleanly on missing APIFY_TOKEN before any paid call, but that's not the
+# point -- it ran without anyone deciding it should). Re-enable the
+# schedule below only once you're actually ready for this to run
+# automatically every day; workflow_dispatch stays live in the meantime
+# so a real run can still happen, but only when explicitly triggered.
 on:
-  schedule:
-    # 13:00 UTC ~= 9am ET (drifts an hour across DST -- fine for a daily digest)
-    - cron: "0 13 * * *"
+  # schedule:
+  #   # 13:00 UTC ~= 9am ET (drifts an hour across DST -- fine for a daily digest)
+  #   - cron: "0 13 * * *"
   workflow_dispatch: {}
 
 permissions:
