@@ -219,7 +219,6 @@ Each subagent scoped narrowly per the "bounded work" principle — no generalist
 
 - The 10 `low_confidence` Track C companies (client-rendered shells: Oracle, JPMorgan's Oracle Fusion UI, Goldman Sachs, etc.) can't be reliably text-hashed — open question whether a heavier Playwright-based monitor is worth building for them later, or whether this gap is accepted
 - Quant firm hiring cycles are often batch/annual rather than rolling — may be better served by a calendar reminder than pure hash-diffing for those specific companies
-- Postings with no date at all (missing-date case in Filter's staleness logic) were meant to be flagged `low_confidence`/visible rather than excluded — needs confirming this was actually implemented that way
 - `pipeline_runs` table / "only show what's new since last successful run" refinement — deliberately deferred until the core pipeline is fully built
 - Form-fill/auto-apply — explicitly out of scope; the pipeline's deliverable ends at a reviewed, tailored, dashboard-ready package
 - Track B's real ongoing search breadth/schedule (and therefore its real Apify + Anthropic cost) hasn't been tuned for deployment yet — was validated functionally, not for production volume
