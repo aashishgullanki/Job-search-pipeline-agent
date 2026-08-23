@@ -133,6 +133,18 @@ jobs:
       - name: Dashboard digest
         run: python3 -m src.dashboard.run_digest
 
+      # Emails whatever data/dashboard.md currently holds, as real HTML
+      # (headers/bullets/bold/links properly rendered), not a link to
+      # anywhere. if: always() so a digest generated from a partial run
+      # (see the save steps below) still gets sent rather than silently
+      # never reaching the inbox -- you'd otherwise have no way to know
+      # the pipeline hit a problem without visiting the Actions tab.
+      - name: Email digest
+        if: always()
+        env:
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+        run: python3 -m src.notify.run_notify
+
       # Runs even if an earlier stage failed (e.g. Score hit a credit
       # limit) so whatever progress *did* happen -- new discoveries,
       # filter results -- isn't lost on the next scheduled run. Every

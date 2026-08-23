@@ -161,7 +161,13 @@ def build_digest_markdown(
             lines.append(f"- **Other tailored roles at {company}:**")
             for o in others:
                 lines.append(
-                    f"  - {_status_checkbox(o['application_status'])} [{o['score']}/10] {o['title']} "
+                    # 4-space indent, not 2 -- Python-Markdown (the renderer
+                    # used for the emailed HTML digest) needs a full 4
+                    # spaces to recognize this as a nested list under the
+                    # "Other tailored roles" item rather than flattening it
+                    # into a sibling at the same level (verified live: 2
+                    # spaces silently lost the nesting entirely).
+                    f"    - {_status_checkbox(o['application_status'])} [{o['score']}/10] {o['title']} "
                     f"(posting_id: {o['posting_id']}) — [posting]({o['url']}) · "
                     f"{_resume_link(o['resume_pdf_path'], reviewed_output_dir)}"
                     f"{_low_confidence_age_badge(o)}"
@@ -190,9 +196,13 @@ def build_digest_markdown(
             f"{_low_confidence_age_badge(lead)}"
         )
         if others:
-            lines.append(f"  - Other scored roles at {company}:")
+            # Same 4-space-per-level reasoning as section 1's other-roles
+            # list -- 4 spaces for this nesting level, 8 for the next.
+            lines.append(f"    - Other scored roles at {company}:")
             for o in others:
-                lines.append(f"    - [{o['score']}/10] {o['title']} ([link]({o['url']})){_low_confidence_age_badge(o)}")
+                lines.append(
+                    f"        - [{o['score']}/10] {o['title']} ([link]({o['url']})){_low_confidence_age_badge(o)}"
+                )
     if review_groups:
         lines.append("")
 

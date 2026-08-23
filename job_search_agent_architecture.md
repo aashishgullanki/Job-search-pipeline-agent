@@ -136,14 +136,17 @@ Cheap, deterministic, no LLM call:
 ## 7. Review Dashboard ✅ Built
 
 - Generated markdown digest (`src/dashboard/`), no new schema — reuses the existing `applications` table for status tracking
-- Surfaces three things:
-  1. Score ≥8 postings with tailored resume PDF link (into `reviewed_output/`), fit reasoning, Tailoring Summary
+- Surfaces three things, one entry per company (other roles at the same company listed compactly underneath, not repeated in full):
+  1. Score ≥8 postings with tailored resume PDF link (into `reviewed_output/`), fit reasoning, current accept status, and an Outreach Draft contact line when that feature is enabled
   2. Score 2-7 postings (the "review list") — company, title, score, reasoning, link — for manual judgment calls, not auto-tailored
   3. Track C `company_monitor_alerts`, kept clearly separate with a ⚠ heading and "not a confirmed job posting" caveat
+- A `⚠ unverified posting date` caveat renders next to any posting Filter's staleness rule flagged `low_confidence_age` rather than confirmed-excluded (missing/unparseable `posted_at`) -- same "flag it, don't hide it" principle as Track C's own `low_confidence` marker
 - "Accept" mechanism: a real CLI command (`set_application_status.py`) shown inline per posting, status rendered as a markdown checkbox — reuses the `applications` table rather than inventing new state
-- `ensure_reviewed_output_copies()` copies tailored PDFs into `reviewed_output/` before the digest links to them, idempotently — specifically closes the gap that caused an earlier incident where a cleanup command deleted the tailored output before it had been reviewed
+- `ensure_reviewed_output_copies()` copies tailored PDFs into `reviewed_output/` before the digest links to them, always overwriting rather than skip-if-exists (a coincidentally-repeated posting_id after a DB reset could otherwise silently keep a stale file under a fresh posting's link) — specifically closes the gap that caused an earlier incident where a cleanup command deleted the tailored output before it had been reviewed
 
-**Status:** built, unit-tested (33 tests). Pending: a real-data verification pass (the DB was found empty between sessions immediately after this stage was built — root cause not yet confirmed) to actually see a populated digest rendered, rather than only the empty-DB smoke test.
+**Email delivery** (`src/notify/`) ✅ Built: renders `dashboard.md` to real HTML (headers/bullets/bold/links as actual tags, not markdown source text -- via Python-Markdown, with a real-parser fix needed along the way: sub-bullets need 4-space indent, not 2, for the library to recognize nesting rather than flattening it) and sends it as the email body itself via SendGrid's REST API (called directly with `requests`, no SDK dependency, same pattern as Apify), to a single hardcoded recipient. Live-verified with two real test sends (HTTP 202, real message IDs returned) before wiring into the cron workflow as the final step.
+
+**Status:** both halves built, unit-tested, and live-verified against real data from a full pipeline run.
 
 ---
 
