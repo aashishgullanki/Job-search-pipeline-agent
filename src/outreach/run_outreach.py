@@ -7,6 +7,11 @@ APIFY_TOKEN and ANTHROPIC_API_KEY. Re-running is a no-op for postings
 already processed (drafted or confirmed no-contact-found) -- see
 src/outreach/store.py.
 
+Gated behind config/features.yaml's outreach_enabled flag (default off):
+when disabled, this exits immediately without even checking for
+APIFY_TOKEN/ANTHROPIC_API_KEY, let alone spending any API usage -- flip
+the flag on when ready, no code changes needed.
+
 Usage:
     python3 -m src.outreach.run_outreach [--db PATH] [--limit N]
 """
@@ -19,6 +24,7 @@ from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
 
+from src.common.features import is_outreach_enabled
 from src.db.connection import DEFAULT_DB_PATH, get_connection, init_db
 from src.outreach.contacts import find_contacts_for_company
 from src.outreach.draft import draft_outreach_message
@@ -31,6 +37,10 @@ from src.score.profile import build_profile_summary
 
 
 def run(db_path: Path = DEFAULT_DB_PATH, limit: int | None = None) -> int:
+    if not is_outreach_enabled():
+        print("[skipped] outreach_enabled is false in config/features.yaml -- no Apify/Anthropic calls made")
+        return 0
+
     load_dotenv()
     apify_token = os.environ.get("APIFY_TOKEN")
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")

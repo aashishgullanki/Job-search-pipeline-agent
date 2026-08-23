@@ -1,0 +1,15 @@
+# Global pipeline feature flags. Kept separate from companies.yaml (a
+# per-company ATS config list, not a natural home for a pipeline-wide
+# toggle) -- flip a value here and no code changes are needed for it to
+# take effect on the next run.
+
+# Outreach Draft stage (architecture doc section 6): contact discovery via
+# Apify's LinkedIn post-search + a Haiku-drafted message, for Track B
+# (LinkedIn-sourced) postings that already have a tailored resume. Off by
+# default -- flip to true once ready to spend the extra Apify + Anthropic
+# usage this costs per Track B posting tailored. When off:
+#   - run_outreach.py skips entirely (no Apify/Anthropic calls at all,
+#     doesn't even require APIFY_TOKEN/ANTHROPIC_API_KEY to be set)
+#   - the dashboard digest doesn't render any outreach fields, even if
+#     stale outreach data exists in the DB from a previous enabled run
+outreach_enabled: false

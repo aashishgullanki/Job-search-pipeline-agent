@@ -49,6 +49,23 @@ def _insert_alert(conn, company, status="unreviewed"):
     conn.commit()
 
 
+def _set_outreach(conn, posting_id, status, name=None, profile_url=None, post_url=None):
+    conn.execute(
+        """UPDATE tailored SET outreach_status = ?, outreach_contact_name = ?,
+           outreach_contact_profile_url = ?, outreach_source_post_url = ? WHERE posting_id = ?""",
+        (status, name, profile_url, post_url, posting_id),
+    )
+    conn.commit()
+
+
+def _filter_result(conn, posting_id, passed=1, low_confidence_age=0):
+    conn.execute(
+        "INSERT INTO filter_results (posting_id, passed, low_confidence_age) VALUES (?, ?, ?)",
+        (posting_id, passed, low_confidence_age),
+    )
+    conn.commit()
+
+
 def test_all_three_section_headers_present(conn, tmp_path):
     md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
 
@@ -266,3 +283,153 @@ def test_generating_digest_creates_application_rows(conn, tmp_path):
 
     row = conn.execute("SELECT status FROM applications WHERE posting_id = ?", (pid,)).fetchone()
     assert row["status"] == "pending_review"
+
+
+# --- outreach field gating (config/features.yaml's outreach_enabled) ---
+
+
+def test_outreach_off_hides_fields_even_with_drafted_data(conn, tmp_path):
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid)
+    _set_outreach(conn, pid, "drafted", name="Jordan Lee", profile_url="https://www.linkedin.com/in/jordan-lee")
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path, outreach_enabled=False)
+
+    assert "Outreach contact" not in md
+    assert "Jordan Lee" not in md
+
+
+def test_outreach_on_shows_drafted_contact(conn, tmp_path):
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid)
+    _set_outreach(
+        conn,
+        pid,
+        "drafted",
+        name="Jordan Lee",
+        profile_url="https://www.linkedin.com/in/jordan-lee",
+        post_url="https://www.linkedin.com/posts/activity-1",
+    )
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path, outreach_enabled=True)
+
+    assert "Outreach contact" in md
+    assert "Jordan Lee" in md
+    assert "https://www.linkedin.com/in/jordan-lee" in md
+    assert "https://www.linkedin.com/posts/activity-1" in md
+
+
+def test_outreach_on_shows_no_contact_found(conn, tmp_path):
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid)
+    _set_outreach(conn, pid, "no_contact_found")
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path, outreach_enabled=True)
+
+    assert "Outreach contact" in md
+    assert "none found" in md.lower()
+
+
+def test_outreach_on_but_not_yet_processed_shows_nothing(conn, tmp_path):
+    # Track A/C postings, or a Track B one Outreach Draft hasn't reached
+    # yet -- outreach_status is NULL, nothing to show, even with the flag on.
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path, outreach_enabled=True)
+
+    assert "Outreach contact" not in md
+
+
+def test_outreach_default_reads_real_config_which_is_off(conn, tmp_path):
+    # outreach_enabled=None (the default) reads config/features.yaml as
+    # actually checked into the repo, which defaults to false.
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid)
+    _set_outreach(conn, pid, "drafted", name="Jordan Lee", profile_url="https://www.linkedin.com/in/jordan-lee")
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    assert "Outreach contact" not in md
+
+
+# --- low_confidence_age caveat (Filter's staleness rule, item 7) ---
+
+
+def test_section_1_shows_caveat_for_low_confidence_age(conn, tmp_path):
+    pid = _insert_posting(conn, "a", company="Blackstone")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid)
+    _filter_result(conn, pid, low_confidence_age=1)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    assert "⚠" in md
+    assert "unverified posting date" in md.lower()
+
+
+def test_section_1_no_caveat_for_confirmed_fresh_posting(conn, tmp_path):
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid)
+    _filter_result(conn, pid, low_confidence_age=0)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    assert "unverified posting date" not in md.lower()
+
+
+def test_section_1_no_caveat_when_no_filter_results_row_at_all(conn, tmp_path):
+    # LEFT JOIN degrades to NULL, not a crash or a false-positive caveat.
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 9)
+    _tailor_success(conn, pid)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    assert "unverified posting date" not in md.lower()
+
+
+def test_section_1_other_role_shows_its_own_caveat_independently(conn, tmp_path):
+    a = _insert_posting(conn, "a", company="Acme", title="Fresh Role")
+    b = _insert_posting(conn, "b", company="Acme", title="Unverified Role")
+    _score(conn, a, 9)
+    _score(conn, b, 8)
+    _tailor_success(conn, a)
+    _tailor_success(conn, b)
+    _filter_result(conn, a, low_confidence_age=0)
+    _filter_result(conn, b, low_confidence_age=1)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    lead_block = md.split("Other tailored roles at Acme:")[0]
+    other_block = md.split("Other tailored roles at Acme:")[1].split("##")[0]
+    assert "unverified posting date" not in lead_block.lower()
+    assert "unverified posting date" in other_block.lower()
+
+
+def test_section_2_shows_caveat_for_low_confidence_age(conn, tmp_path):
+    pid = _insert_posting(conn, "a", company="Blackstone")
+    _score(conn, pid, 5)
+    _filter_result(conn, pid, low_confidence_age=1)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    manual_section = md.split("## For manual review")[1].split("## ⚠")[0]
+    assert "unverified posting date" in manual_section.lower()
+
+
+def test_section_2_no_caveat_for_confirmed_fresh_posting(conn, tmp_path):
+    pid = _insert_posting(conn, "a")
+    _score(conn, pid, 5)
+    _filter_result(conn, pid, low_confidence_age=0)
+
+    md = build_digest_markdown(conn, threshold=8, reviewed_output_dir=tmp_path)
+
+    manual_section = md.split("## For manual review")[1].split("## ⚠")[0]
+    assert "unverified posting date" not in manual_section.lower()

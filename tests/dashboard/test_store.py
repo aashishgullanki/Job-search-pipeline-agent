@@ -239,6 +239,40 @@ def test_application_status_null_when_no_row_yet(conn):
     assert result[0]["application_status"] is None
 
 
+def test_outreach_fields_null_when_not_yet_processed(conn):
+    a = _insert_posting(conn, "a")
+    _score(conn, a, 9)
+    _tailor_success(conn, a)
+
+    result = get_tailored_postings(conn, threshold=8)
+
+    assert result[0]["outreach_status"] is None
+    assert result[0]["outreach_contact_name"] is None
+    assert result[0]["outreach_contact_profile_url"] is None
+    assert result[0]["outreach_source_post_url"] is None
+
+
+def test_outreach_fields_populated_after_outreach_drafted(conn):
+    a = _insert_posting(conn, "a")
+    _score(conn, a, 9)
+    _tailor_success(conn, a)
+    conn.execute(
+        """UPDATE tailored SET outreach_status = 'drafted', outreach_contact_name = 'Jordan Lee',
+           outreach_contact_profile_url = 'https://www.linkedin.com/in/jordan-lee',
+           outreach_source_post_url = 'https://www.linkedin.com/posts/activity-1'
+           WHERE posting_id = ?""",
+        (a,),
+    )
+    conn.commit()
+
+    result = get_tailored_postings(conn, threshold=8)
+
+    assert result[0]["outreach_status"] == "drafted"
+    assert result[0]["outreach_contact_name"] == "Jordan Lee"
+    assert result[0]["outreach_contact_profile_url"] == "https://www.linkedin.com/in/jordan-lee"
+    assert result[0]["outreach_source_post_url"] == "https://www.linkedin.com/posts/activity-1"
+
+
 def test_sorted_by_score_desc_then_company_title(conn):
     a = _insert_posting(conn, "a", company="Zeta")
     b = _insert_posting(conn, "b", company="Alpha")

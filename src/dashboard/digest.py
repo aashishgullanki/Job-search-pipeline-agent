@@ -22,6 +22,7 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.common.features import is_outreach_enabled
 from src.dashboard.store import (
     REVIEWED_OUTPUT_DIR,
     ensure_application_rows,
@@ -71,11 +72,47 @@ def _status_checkbox(status: str | None) -> str:
     return {"accepted": "[x]", "submitted": "[x]", "rejected": "[rej]"}.get(status, "[ ]")
 
 
+def _low_confidence_age_badge(row: sqlite3.Row) -> str:
+    """Compact inline caveat for a posting whose freshness couldn't be
+    confirmed by the Filter stage (missing/unparseable posted_at) --
+    passed rather than excluded, same "flag it, don't hide it" principle
+    as Track C's low_confidence marker, so it needs the same kind of
+    visible caveat here rather than looking like any other confirmed-
+    fresh posting. `row["low_confidence_age"]` comes from a LEFT JOIN so
+    it may be a genuine 0/1 or SQLite's NULL (falsy either way) depending
+    on whether a filter_results row exists at all.
+    """
+    return " ⚠ _unverified posting date_" if row["low_confidence_age"] else ""
+
+
+def _outreach_line(row: sqlite3.Row) -> str | None:
+    """None if there's nothing worth a line -- not yet processed by the
+    Outreach Draft stage (Track A/C postings, or a Track B one it hasn't
+    reached yet). Caller only calls this when outreach is enabled.
+    """
+    status = row["outreach_status"]
+    if status == "drafted":
+        return (
+            f"- **Outreach contact:** {row['outreach_contact_name'] or 'Unknown'} "
+            f"([profile]({row['outreach_contact_profile_url']})) -- found via "
+            f"[this post]({row['outreach_source_post_url']})"
+        )
+    if status == "no_contact_found":
+        return "- **Outreach contact:** _none found (Apify LinkedIn post search, widened once, still nothing)_"
+    return None
+
+
 def build_digest_markdown(
     conn: sqlite3.Connection,
     threshold: int = TAILOR_SCORE_THRESHOLD,
     reviewed_output_dir: Path = REVIEWED_OUTPUT_DIR,
+    outreach_enabled: bool | None = None,
 ) -> str:
+    # outreach_enabled=None means "check the real config" -- tests inject
+    # True/False directly so they don't depend on config/features.yaml's
+    # actual on-disk contents.
+    outreach_on = is_outreach_enabled() if outreach_enabled is None else outreach_enabled
+
     ensure_application_rows(conn)
     ensure_reviewed_output_copies(conn, dest_dir=reviewed_output_dir)
 
@@ -108,12 +145,17 @@ def build_digest_markdown(
         lines.append(
             f"### {_status_marker(lead['application_status'])} -- [{lead['score']}/10] "
             f"{lead['company']} — {lead['title']} (posting_id: {lead['posting_id']})"
+            f"{_low_confidence_age_badge(lead)}"
         )
         lines.append("")
         lines.append(f"- **Location:** {lead['location'] or 'n/a'}")
         lines.append(f"- **Posting:** {lead['url']}")
         lines.append(f"- **Resume:** {_resume_link(lead['resume_pdf_path'], reviewed_output_dir)}")
         lines.append(f"- **Fit reasoning:** {lead['reasoning']}")
+        if outreach_on:
+            outreach_line = _outreach_line(lead)
+            if outreach_line:
+                lines.append(outreach_line)
         lines.append(f"- **Accept/reject:** `{ACCEPT_COMMAND_TEMPLATE.format(posting_id=lead['posting_id'])}`")
         if others:
             lines.append(f"- **Other tailored roles at {company}:**")
@@ -122,6 +164,7 @@ def build_digest_markdown(
                     f"  - {_status_checkbox(o['application_status'])} [{o['score']}/10] {o['title']} "
                     f"(posting_id: {o['posting_id']}) — [posting]({o['url']}) · "
                     f"{_resume_link(o['resume_pdf_path'], reviewed_output_dir)}"
+                    f"{_low_confidence_age_badge(o)}"
                 )
         lines.append("")
 
@@ -144,11 +187,12 @@ def build_digest_markdown(
         lines.append(
             f"- **[{lead['score']}/10] {lead['company']} — {lead['title']}** "
             f"({lead['location'] or 'n/a'}) -- {lead['reasoning']} ([link]({lead['url']}))"
+            f"{_low_confidence_age_badge(lead)}"
         )
         if others:
             lines.append(f"  - Other scored roles at {company}:")
             for o in others:
-                lines.append(f"    - [{o['score']}/10] {o['title']} ([link]({o['url']}))")
+                lines.append(f"    - [{o['score']}/10] {o['title']} ([link]({o['url']})){_low_confidence_age_badge(o)}")
     if review_groups:
         lines.append("")
 

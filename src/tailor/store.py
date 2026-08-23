@@ -54,13 +54,21 @@ def record_tailored_failure(conn: sqlite3.Connection, posting_id: int, reason: s
 def get_review_list_postings(conn: sqlite3.Connection, threshold: int = TAILOR_SCORE_THRESHOLD) -> list[sqlite3.Row]:
     """Filter-passed, scored, but below the tailor threshold -- these never
     get an automatic resume, but the score/reasoning still needs to be
-    reviewable so a human can decide manually.
+    reviewable so a human can decide manually. Includes
+    low_confidence_age (LEFT JOIN, not INNER -- every scored posting
+    should have a filter_results row since Score only processes
+    filter-passed ones, but this degrades to NULL/falsy rather than
+    silently dropping a row if that's ever not true) so a caller can flag
+    a posting whose freshness couldn't be confirmed, same as the
+    dashboard does for the tailored side.
     """
     return conn.execute(
         """
-        SELECT p.company, p.title, p.url, p.location, s.score, s.reasoning
+        SELECT p.company, p.title, p.url, p.location, s.score, s.reasoning,
+               f.low_confidence_age
         FROM postings p
         JOIN scores s ON s.posting_id = p.id
+        LEFT JOIN filter_results f ON f.posting_id = p.id
         WHERE s.score < ?
         ORDER BY s.score DESC, p.company, p.title
         """,

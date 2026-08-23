@@ -84,13 +84,14 @@ jobs:
         run: python3 -m src.discovery.run_track_a_workday
 
       - name: "Discovery: Track C (company monitor)"
+        # run_track_c_monitor.py's own exit code already distinguishes
+        # expected partial failure (a minority bot-blocked, e.g. Tesla/
+        # Citadel Securities/Meta -- exits 0) from something systemic (a
+        # majority or all 32 failing, or no companies loaded -- exits 1),
+        # so this step doesn't need continue-on-error: true. Keeping it
+        # would actively mask a genuine systemic failure instead of
+        # surfacing it, which defeats the point of that distinction.
         run: python3 -m src.discovery.run_track_c_monitor
-        # Expected, not a real failure: 3 companies (Tesla/Citadel
-        # Securities/Meta) are bot-blocked and the runner reports that via
-        # a non-zero exit by design -- see run_track_c_monitor.py. A
-        # *different* company newly failing would need investigating, but
-        # shouldn't block the rest of the pipeline either way.
-        continue-on-error: true
 
       - name: "Discovery: Track B (LinkedIn)"
         env:
@@ -116,6 +117,12 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python3 -m src.tailor.run_tailor
 
+      # Gated behind config/features.yaml's outreach_enabled (default
+      # false) -- when off, run_outreach.py exits immediately without
+      # touching either secret below, so this step is a fast no-op rather
+      # than needing to be removed/commented out here. Flip the flag in
+      # that file, not this workflow, to turn contact discovery + drafting
+      # on -- no code or workflow changes needed either way.
       - name: Outreach Draft
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -148,6 +155,16 @@ jobs:
       # email/Slack delivery yet (architecture doc section 7 mentions it as
       # a future step) -- reading the digest today means downloading this
       # artifact from the Actions run page.
+      #
+      # Includes reviewed_output/*.pdf, not just data/tailored/*.pdf --
+      # dashboard.md's own resume links are relative paths pointing at
+      # ../reviewed_output/{file}.pdf (see dashboard/digest.py's
+      # _resume_link()), so without this the digest would download with
+      # every resume link dangling. data/tailored/*.pdf is kept too as a
+      # deliberate fallback (duplicate files, small tradeoff) in case the
+      # Dashboard step itself didn't run for some reason but Tailor did --
+      # that copy doesn't depend on ensure_reviewed_output_copies() having
+      # actually executed.
       - name: Save digest + tailored resumes
         if: always()
         uses: actions/upload-artifact@v4
@@ -157,6 +174,7 @@ jobs:
             data/dashboard.md
             data/review_list.md
             data/tailored/*.pdf
+            reviewed_output/*.pdf
           retention-days: 30
           overwrite: true
           if-no-files-found: warn

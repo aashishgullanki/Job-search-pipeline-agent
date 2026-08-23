@@ -70,7 +70,25 @@ def run(db_path: Path = DEFAULT_DB_PATH) -> int:
             print(f"  - {name}: {err}")
 
     conn.close()
-    return 1 if failures else 0
+
+    # A handful of companies being bot-blocked (403/400 from an anti-bot
+    # layer, not this code) is expected steady-state, not a run worth
+    # failing over -- confirmed live: 29/32 succeeded with only 3
+    # consistently-blocked failures (Tesla, Citadel Securities, Meta).
+    # Only hard-fail on something systemic: every company failed (real
+    # outage or a genuine code/config bug, not anti-bot noise) or a
+    # majority did (more failures than successes means something's
+    # actually broken, not just a few sites blocking scrapers).
+    if len(companies) == 0:
+        print("[error] no Track C companies loaded from config -- treating as a config error, not a clean run")
+        return 1
+    if len(failures) == len(companies):
+        print("[error] every Track C company failed to fetch -- likely a systemic issue, not anti-bot noise")
+        return 1
+    if len(failures) * 2 > len(companies):
+        print(f"[error] {len(failures)}/{len(companies)} companies failed -- majority failed, not a clean run")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

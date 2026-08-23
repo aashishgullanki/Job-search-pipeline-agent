@@ -82,19 +82,30 @@ def ensure_reviewed_output_copies(conn: sqlite3.Connection, dest_dir: Path = REV
 def get_tailored_postings(conn: sqlite3.Connection, threshold: int) -> list[sqlite3.Row]:
     """Score>=threshold postings with a successful tailoring -- everything
     the "ready to review" section needs in one row: score, reasoning, the
-    tailored resume paths, the tailoring summary, and current accept
-    status (NULL if ensure_application_rows hasn't run yet this call).
+    tailored resume paths, the tailoring summary, current accept status
+    (NULL if ensure_application_rows hasn't run yet this call), the
+    Outreach Draft stage's own fields (all NULL for a Track A/C posting,
+    or a Track B one the Outreach Draft stage hasn't reached yet -- the
+    digest only renders these when outreach is actually enabled, see
+    dashboard/digest.py), and low_confidence_age (LEFT JOIN, same
+    robustness reasoning as tailor/store.py's get_review_list_postings)
+    so the digest can flag a posting whose freshness couldn't be
+    confirmed, same pattern as Track C's low_confidence flag.
     """
     return conn.execute(
         """
         SELECT p.id AS posting_id, p.company, p.title, p.url, p.location,
                s.score, s.reasoning,
                t.resume_pdf_path, t.resume_tex_path, t.outreach_draft, t.tailoring_summary,
-               a.status AS application_status
+               t.outreach_status, t.outreach_contact_name, t.outreach_contact_profile_url,
+               t.outreach_source_post_url,
+               a.status AS application_status,
+               f.low_confidence_age
         FROM postings p
         JOIN scores s ON s.posting_id = p.id
         JOIN tailored t ON t.posting_id = p.id AND t.status = 'tailored'
         LEFT JOIN applications a ON a.posting_id = p.id
+        LEFT JOIN filter_results f ON f.posting_id = p.id
         WHERE s.score >= ?
         ORDER BY s.score DESC, p.company, p.title
         """,
