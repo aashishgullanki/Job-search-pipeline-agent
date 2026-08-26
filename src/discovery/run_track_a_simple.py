@@ -57,7 +57,21 @@ def run(db_path: Path = DEFAULT_DB_PATH) -> int:
             print(f"  - {name}: {err}")
 
     conn.close()
-    return 1 if errors else 0
+
+    # Same reasoning as run_track_a_workday.py and Track C's monitor: one
+    # company hitting a fetch problem shouldn't fail the whole run. Only
+    # hard-fail on something systemic (a majority failed, all failed, or
+    # no companies loaded -- a real config error).
+    if len(companies) == 0:
+        print("[error] no Track A Greenhouse/Ashby companies loaded from config -- treating as a config error, not a clean run")
+        return 1
+    if len(errors) == len(companies):
+        print("[error] every Track A Greenhouse/Ashby company failed -- likely a systemic issue, not an isolated fetch problem")
+        return 1
+    if len(errors) * 2 > len(companies):
+        print(f"[error] {len(errors)}/{len(companies)} companies failed -- majority failed, not a clean run")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

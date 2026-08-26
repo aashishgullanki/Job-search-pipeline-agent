@@ -28,6 +28,13 @@ EMPTY_PAGE_RETRIES = 2
 EMPTY_PAGE_RETRY_DELAY_SECONDS = 1.0
 MAX_PAGES = 300  # safety cap (6000 postings at PAGE_SIZE=20) against the wraparound quirk above
 
+# Live-observed: Nvidia's Workday board occasionally 500s mid-pagination
+# (deep offset, large board -- 2000+ postings), on two separate real runs.
+# A short retry recovers it most of the time without anyone noticing; see
+# fetch_workday_jobs's docstring for what happens on the rare case it doesn't.
+TRANSIENT_ERROR_RETRIES = 2
+TRANSIENT_ERROR_RETRY_DELAY_SECONDS = 2.0
+
 
 def _workday_urls(careers_url: str, tenant: str, site: str) -> tuple[str, str]:
     """Derive the POST endpoint and the job-page base URL from careers_url's host.
@@ -59,6 +66,26 @@ def _fetch_page(cxs_url: str, offset: int, limit: int, timeout: int) -> dict:
     return resp.json()
 
 
+def _fetch_page_with_retry(
+    cxs_url: str, offset: int, limit: int, timeout: int, retries: int, retry_delay: float
+) -> dict:
+    """Retries a page fetch that raised (request exception or non-200
+    status) before giving up on it -- covers a transient blip (e.g.
+    Nvidia's occasional HTTP 500 mid-pagination) the same way empty pages
+    already get retried below. Re-raises the last error if every attempt
+    fails.
+    """
+    last_error: RuntimeError | None = None
+    for attempt in range(retries + 1):
+        try:
+            return _fetch_page(cxs_url, offset, limit, timeout)
+        except RuntimeError as e:
+            last_error = e
+            if attempt < retries:
+                time.sleep(retry_delay)
+    raise last_error
+
+
 def fetch_workday_jobs(
     tenant: str,
     site: str,
@@ -68,15 +95,28 @@ def fetch_workday_jobs(
     page_delay: float = PAGE_DELAY_SECONDS,
     empty_retries: int = EMPTY_PAGE_RETRIES,
     empty_retry_delay: float = EMPTY_PAGE_RETRY_DELAY_SECONDS,
+    transient_error_retries: int = TRANSIENT_ERROR_RETRIES,
+    transient_error_retry_delay: float = TRANSIENT_ERROR_RETRY_DELAY_SECONDS,
     timeout: int = 20,
-) -> list[dict]:
+) -> tuple[list[dict], str | None]:
     """Paginate a Workday cxs/jobs board in steps of `page_size` and normalize the results.
+
+    Returns (jobs, error). `error` is None on a clean completion (or a
+    genuinely job-free board). If a page fetch keeps failing even after
+    retries, pagination stops there and `error` holds the reason --
+    but `jobs` still holds everything successfully fetched *before* that
+    point. Discarding real, already-fetched postings just because a later
+    page failed would be strictly worse than keeping the partial result
+    and being honest that it's partial; a later run starts pagination
+    from offset 0 again regardless, so nothing here is permanently lost
+    either way, this just avoids losing it for a whole extra cycle.
 
     Terminal conditions, checked in this order, first one wins:
       1. a page comes back shorter than `page_size` -- the reliable "last page" signal
       2. offset + page_size reaches the `total` reported by page 1 (safety net,
          stops us before ever requesting an offset that could wrap around)
-      3. MAX_PAGES reached (should never fire on real data; last-resort guard)
+      3. a page fetch fails even after transient_error_retries attempts
+      4. MAX_PAGES reached (should never fire on real data; last-resort guard)
 
     A page with zero postings is retried (with a short backoff) up to
     `empty_retries` times before being accepted as terminal -- covers both a
@@ -89,7 +129,13 @@ def fetch_workday_jobs(
     total_expected: int | None = None
 
     for page_num in range(MAX_PAGES):
-        data = _fetch_page(cxs_url, offset, page_size, timeout)
+        try:
+            data = _fetch_page_with_retry(
+                cxs_url, offset, page_size, timeout, transient_error_retries, transient_error_retry_delay
+            )
+        except RuntimeError as e:
+            return jobs, str(e)
+
         postings = data.get("jobPostings", [])
 
         if page_num == 0 and data.get("total"):
@@ -98,7 +144,12 @@ def fetch_workday_jobs(
         if not postings:
             for _ in range(empty_retries):
                 time.sleep(empty_retry_delay)
-                data = _fetch_page(cxs_url, offset, page_size, timeout)
+                try:
+                    data = _fetch_page_with_retry(
+                        cxs_url, offset, page_size, timeout, transient_error_retries, transient_error_retry_delay
+                    )
+                except RuntimeError as e:
+                    return jobs, str(e)
                 postings = data.get("jobPostings", [])
                 if postings:
                     break
@@ -115,4 +166,4 @@ def fetch_workday_jobs(
         offset += page_size
         time.sleep(page_delay)
 
-    return jobs
+    return jobs, None

@@ -75,6 +75,14 @@ jobs:
           path: data/
           if_no_artifact_found: warn # first-ever run: nothing to restore yet, start fresh
 
+      # Both Track A runners' exit codes now match Track C's: one company
+      # hitting a fetch problem (found live -- Nvidia's Workday board 500'd
+      # mid-pagination on two separate real runs, which used to fail this
+      # whole job even though 16/17 companies succeeded) doesn't fail the
+      # run; only a majority failing, all failing, or no companies loaded
+      # does. No continue-on-error needed here for the same reason as
+      # Track C -- it would mask a genuine systemic failure instead of
+      # surfacing it.
       - name: "Discovery: Track A (Greenhouse + Ashby)"
         run: python3 -m src.discovery.run_track_a_simple
 

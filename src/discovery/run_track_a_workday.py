@@ -31,13 +31,17 @@ def run(db_path: Path = DEFAULT_DB_PATH) -> int:
     for c in companies:
         name = c["name"]
         try:
-            jobs = fetch_workday_jobs(
+            jobs, error = fetch_workday_jobs(
                 tenant=c["tenant"],
                 site=c["site"],
                 company=name,
                 careers_url=c["careers_url"],
             )
-        except RuntimeError as e:
+        except Exception as e:
+            # fetch_workday_jobs itself no longer raises for a page-fetch
+            # failure (it returns partial jobs + an error message instead,
+            # see its docstring) -- this is a safety net for anything
+            # genuinely unexpected, not the normal transient-failure path.
             errors.append((name, str(e)))
             print(f"[error] {name}: {e}")
             continue
@@ -45,7 +49,11 @@ def run(db_path: Path = DEFAULT_DB_PATH) -> int:
         new, skipped = insert_new_postings(conn, jobs)
         total_new += new
         total_skipped += skipped
-        print(f"{name}: {len(jobs)} fetched, {new} new, {skipped} already seen")
+        if error:
+            errors.append((name, error))
+            print(f"[partial] {name}: {len(jobs)} fetched before failure ({new} new, {skipped} already seen) -- {error}")
+        else:
+            print(f"{name}: {len(jobs)} fetched, {new} new, {skipped} already seen")
 
     print(
         f"\n{len(companies)} companies polled | "
@@ -58,7 +66,23 @@ def run(db_path: Path = DEFAULT_DB_PATH) -> int:
             print(f"  - {name}: {err}")
 
     conn.close()
-    return 1 if errors else 0
+
+    # A single company hitting a transient/unrecoverable fetch problem is
+    # expected steady-state, not a run worth failing over -- live-observed
+    # twice: Nvidia's Workday board 500ing mid-pagination while 16/17 (94%)
+    # of companies succeeded cleanly. Same reasoning as Track C's monitor:
+    # only hard-fail on something systemic (a majority failed, all failed,
+    # or no companies loaded at all -- a real config error).
+    if len(companies) == 0:
+        print("[error] no Track A Workday companies loaded from config -- treating as a config error, not a clean run")
+        return 1
+    if len(errors) == len(companies):
+        print("[error] every Track A Workday company failed -- likely a systemic issue, not an isolated fetch problem")
+        return 1
+    if len(errors) * 2 > len(companies):
+        print(f"[error] {len(errors)}/{len(companies)} companies failed -- majority failed, not a clean run")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
