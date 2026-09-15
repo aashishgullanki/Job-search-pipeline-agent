@@ -15,7 +15,7 @@ name: Job Search Pipeline
 # explicit direction, with secrets confirmed present and
 # outreach_enabled confirmed false beforehand.
 on:
-  schedule:
+  # schedule:
     # 13:00 UTC == 9am ET during EDT (now); becomes 8am ET once EST
     # resumes in ~November, since this doesn't auto-adjust for DST.
     # - cron: "0 13 * * *"
